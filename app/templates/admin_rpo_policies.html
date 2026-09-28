@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}Políticas de RPO — Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0"><i class="bi bi-stopwatch me-2"></i>Políticas de RPO Esperado</h2>
+    <p class="page-subtitle mb-0">Defina o RPO esperado por VM e gerencie as políticas reutilizáveis</p>
+  </div>
+</div>
+
+<div class="alert border-0 py-2 mb-3 small d-flex gap-2" style="background:rgba(13,110,253,.07)">
+  <i class="bi bi-info-circle-fill text-primary mt-1 flex-shrink-0"></i>
+  <span>
+    O <strong>RPO esperado</strong> é configurado manualmente e usado para comparar com o RPO
+    observado nas análises históricas. VMs sem política configurada usam o padrão global de
+    <strong>{{ default_rpo_h }}h</strong>.
+  </span>
+</div>
+
+<!-- ═══════════════════════ POLÍTICAS ═══════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-collection me-2 text-muted"></i>Políticas de RPO
+      <span class="badge bg-secondary ms-1" id="polCount">{{ policies|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-primary" onclick="showPolicyForm()">
+      <i class="bi bi-plus-lg me-1"></i>Nova política
+    </button>
+  </div>
+
+  <!-- Formulário inline -->
+  <div id="policyForm" class="card-body border-bottom bg-light py-2 d-none">
+    <input type="hidden" id="polId">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-sm-4">
+        <label class="form-label small fw-semibold mb-1">Nome *</label>
+        <input type="text" class="form-control form-control-sm" id="polName" placeholder="Ex: RPO 2h">
+      </div>
+      <div class="col-6 col-sm-2">
+        <label class="form-label small fw-semibold mb-1">Minutos *</label>
+        <input type="number" class="form-control form-control-sm" id="polMinutes" min="1" placeholder="120">
+        <div class="form-text" style="font-size:.68rem" id="polMinutesHint"></div>
+      </div>
+      <div class="col-6 col-sm-2">
+        <label class="form-label small fw-semibold mb-1">Severidade padrão</label>
+        <select class="form-select form-select-sm" id="polSeverity">
+          <option value="low">Baixa</option>
+          <option value="medium" selected>Média</option>
+          <option value="high">Alta</option>
+          <option value="critical">Crítica</option>
+        </select>
+      </div>
+      <div class="col-12 col-sm-3">
+        <label class="form-label small fw-semibold mb-1">Descrição</label>
+        <input type="text" class="form-control form-control-sm" id="polDescription" maxlength="200">
+      </div>
+      <div class="col-6 col-sm-1 d-flex align-items-end gap-1">
+        <button class="btn btn-primary btn-sm" id="btnSavePolicy"><i class="bi bi-check-lg"></i></button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="hidePolicyForm()"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.82rem">
+      <thead class="table-light" style="font-size:.74rem">
+        <tr>
+          <th class="ps-3">Nome</th>
+          <th style="width:120px" class="text-center">RPO Esperado</th>
+          <th style="width:120px" class="text-center">Severidade</th>
+          <th style="width:220px">Descrição</th>
+          <th style="width:110px" class="text-center">VMs vinculadas</th>
+          <th style="width:110px" class="text-center">Ações</th>
+        </tr>
+      </thead>
+      <tbody id="policyTable">
+        <tr><td colspan="6" class="text-center text-muted py-3 small">
+          <div class="spinner-border spinner-border-sm"></div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════ ATRIBUIÇÕES ══════════════════════════════════════ -->
+<div class="card shadow-sm mb-3">
+  <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-diagram-3 me-2 text-muted"></i>Atribuições de RPO por VM
+      <span class="badge bg-secondary ms-1" id="assignCount">—</span>
+    </span>
+    <div class="d-flex gap-2 align-items-center">
+      <select class="form-select form-select-sm" id="assignFilterClient" style="width:200px">
+        <option value="">Todos os clientes</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" class="form-control form-control-sm" id="assignFilterVM"
+             placeholder="Buscar VM…" style="width:180px" autocomplete="off">
+      <button class="btn btn-sm btn-outline-primary" onclick="showAssignForm()">
+        <i class="bi bi-plus-lg me-1"></i>Atribuir RPO
+      </button>
+    </div>
+  </div>
+
+  <!-- Formulário de nova atribuição -->
+  <div id="assignForm" class="card-body border-bottom bg-light py-2 d-none">
+    <input type="hidden" id="assignId">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-sm-3">
+        <label class="form-label small fw-semibold mb-1">Cliente *</label>
+        <select class="form-select form-select-sm" id="assignClient">
+          <option value="">— selecione —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-sm-3">
+        <label class="form-label small fw-semibold mb-1">Nome da VM *</label>
+        <input type="text" class="form-control form-control-sm" id="assignVM" placeholder="Ex: SRV-EXEMPLO">
+      </div>
+      <div class="col-6 col-sm-2">
+        <label class="form-label small fw-semibold mb-1">Política</label>
+        <select class="form-select form-select-sm" id="assignPolicy" onchange="onPolicyChange()">
+          <option value="">Personalizado</option>
+          {% for p in policies %}
+          <option value="{{ p.id }}" data-minutes="{{ p.expected_minutes }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-sm-2">
+        <label class="form-label small fw-semibold mb-1">Minutos *</label>
+        <input type="number" class="form-control form-control-sm" id="assignMinutes" min="1">
+        <div class="form-text" style="font-size:.68rem" id="assignMinutesHint"></div>
+      </div>
+      <div class="col-6 col-sm-1">
+        <label class="form-label small fw-semibold mb-1">Criticidade</label>
+        <select class="form-select form-select-sm" id="assignCriticality">
+          <option value="">—</option>
+          <option value="low">Baixa</option>
+          <option value="medium">Média</option>
+          <option value="high">Alta</option>
+          <option value="critical">Crítica</option>
+        </select>
+      </div>
+      <div class="col-12 col-sm-3">
+        <label class="form-label small fw-semibold mb-1">Observação</label>
+        <input type="text" class="form-control form-control-sm" id="assignNotes" maxlength="300">
+      </div>
+      <div class="col-12 col-sm-auto d-flex align-items-end gap-1">
+        <button class="btn btn-primary btn-sm" id="btnSaveAssign"><i class="bi bi-check-lg"></i> Salvar</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="hideAssignForm()"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-height:480px;overflow-y:auto">
+    <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.80rem">
+      <thead class="table-light sticky-top" style="font-size:.73rem">
+        <tr>
+          <th class="ps-3" style="min-width:200px">Máquina Virtual</th>
+          <th style="width:200px">Ambiente / Cliente</th>
+          <th style="width:130px" class="text-center">RPO Esperado</th>
+          <th style="width:150px" class="text-center">Política</th>
+          <th style="width:100px" class="text-center">Criticidade</th>
+          <th style="min-width:160px">Observação</th>
+          <th style="width:90px" class="text-center">Ações</th>
+        </tr>
+      </thead>
+      <tbody id="assignTable">
+        <tr><td colspan="7" class="text-center text-muted py-3 small">
+          <div class="spinner-border spinner-border-sm"></div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card-footer d-flex justify-content-between align-items-center small text-muted py-1 px-3 flex-wrap gap-2"
+       id="assignPagination" style="display:none!important">
+    <span id="assignPaginationInfo"></span>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary" id="btnAssFirst"><i class="bi bi-chevron-double-left"></i></button>
+      <button class="btn btn-outline-secondary" id="btnAssPrev"><i class="bi bi-chevron-left"></i></button>
+      <span class="btn btn-outline-secondary disabled px-2" id="assPageIndicator" style="pointer-events:none;min-width:60px;text-align:center">—</span>
+      <button class="btn btn-outline-secondary" id="btnAssNext"><i class="bi bi-chevron-right"></i></button>
+      <button class="btn btn-outline-secondary" id="btnAssLast"><i class="bi bi-chevron-double-right"></i></button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="rpoToast" class="toast align-items-center border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body fw-semibold" id="rpoToastMsg">OK</div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SEV_BADGE = {
+  low:      '<span class="badge bg-light text-muted border">Baixa</span>',
+  medium:   '<span class="badge bg-warning text-dark">Média</span>',
+  high:     '<span class="badge bg-danger">Alta</span>',
+  critical: '<span class="badge" style="background:#7b1818;color:#fff">Crítica</span>',
+};
+
+function showToast(msg, ok=true) {
+  const t = document.getElementById('rpoToast');
+  t.className = `toast align-items-center border-0 text-bg-${ok?'success':'danger'}`;
+  document.getElementById('rpoToastMsg').textContent = msg;
+  bootstrap.Toast.getOrCreateInstance(t, {delay:2800}).show();
+}
+function esc(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtH(m) {
+  if (!m) return '—';
+  m = parseInt(m);
+  const h = Math.floor(m/60), mn = m%60;
+  if (h > 0 && mn > 0) return `${h}h ${mn}m`;
+  if (h > 0) return `${h}h`;
+  return `${mn}m`;
+}
+async function apiFetch(url, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail||'Erro'); }
+  return r.json();
+}
+
+// ── Policies ──────────────────────────────────────────────────────────────────
+let _policies = [];
+
+async function loadPolicies() {
+  try {
+    _policies = await apiFetch('/api/admin/rpo-policies');
+    renderPolicies();
+    document.getElementById('polCount').textContent = _policies.length;
+  } catch(e) { showToast('Erro ao carregar políticas.', false); }
+}
+
+async function loadPolicyVMCounts() {
+  // Count assignments per policy
+  const data = await apiFetch('/api/admin/vm-rpo-assignments?page=1&page_size=1000').catch(()=>({assignments:[]}));
+  const counts = {};
+  (data.assignments||[]).forEach(a => {
+    const k = a.rpo_policy_id;
+    if (k) counts[k] = (counts[k]||0)+1;
+  });
+  return counts;
+}
+
+async function renderPolicies() {
+  const counts = await loadPolicyVMCounts().catch(()=>({}));
+  const tbody  = document.getElementById('policyTable');
+  if (!_policies.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-3 small">Nenhuma política cadastrada.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = _policies.map(p => `<tr>
+    <td class="ps-3 fw-semibold">${esc(p.name)}</td>
+    <td class="text-center"><span class="badge bg-primary" style="font-size:.80rem">${fmtH(p.expected_minutes)}</span></td>
+    <td class="text-center">${SEV_BADGE[p.severity_default]||esc(p.severity_default)}</td>
+    <td class="text-muted small">${esc(p.description||'—')}</td>
+    <td class="text-center"><span class="badge bg-light text-dark border">${counts[p.id]||0} VMs</span></td>
+    <td class="text-center">
+      <button class="btn btn-link btn-sm p-0 text-primary me-2" onclick="editPolicy(${p.id})" title="Editar"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-link btn-sm p-0 text-danger" onclick="deletePolicy(${p.id})" title="Excluir"><i class="bi bi-trash"></i></button>
+    </td>
+  </tr>`).join('');
+}
+
+function showPolicyForm(prefill={}) {
+  document.getElementById('polId').value          = prefill.id||'';
+  document.getElementById('polName').value         = prefill.name||'';
+  document.getElementById('polMinutes').value      = prefill.expected_minutes||'';
+  document.getElementById('polSeverity').value     = prefill.severity_default||'medium';
+  document.getElementById('polDescription').value  = prefill.description||'';
+  updateMinutesHint('polMinutes','polMinutesHint');
+  document.getElementById('policyForm').classList.remove('d-none');
+  document.getElementById('polName').focus();
+}
+function hidePolicyForm() { document.getElementById('policyForm').classList.add('d-none'); }
+
+function editPolicy(id) {
+  const p = _policies.find(p=>p.id===id);
+  if (p) showPolicyForm(p);
+}
+
+document.getElementById('polMinutes').addEventListener('input', function() {
+  updateMinutesHint('polMinutes','polMinutesHint');
+});
+
+function updateMinutesHint(inputId, hintId) {
+  const m = parseInt(document.getElementById(inputId).value)||0;
+  document.getElementById(hintId).textContent = m ? `= ${fmtH(m)}` : '';
+}
+
+document.getElementById('btnSavePolicy').addEventListener('click', async () => {
+  const id      = document.getElementById('polId').value;
+  const name    = document.getElementById('polName').value.trim();
+  const minutes = parseInt(document.getElementById('polMinutes').value)||0;
+  if (!name)    { alert('Informe o nome.'); return; }
+  if (!minutes) { alert('Informe os minutos.'); return; }
+  const data = {
+    name, expected_minutes: minutes,
+    severity_default: document.getElementById('polSeverity').value,
+    description: document.getElementById('polDescription').value.trim(),
+    is_active: true,
+  };
+  try {
+    if (id) { await apiFetch(`/api/admin/rpo-policies/${id}`, 'PUT', data); showToast('Política atualizada.'); }
+    else    { await apiFetch('/api/admin/rpo-policies', 'POST', data); showToast('Política criada.'); }
+    hidePolicyForm();
+    await loadPolicies();
+  } catch(e) { showToast(e.message||'Erro.', false); }
+});
+
+async function deletePolicy(id) {
+  if (!confirm('Excluir esta política? VMs vinculadas perderão a referência à política mas manterão o RPO configurado.')) return;
+  try {
+    await apiFetch(`/api/admin/rpo-policies/${id}`, 'DELETE');
+    showToast('Política excluída.');
+    await loadPolicies();
+  } catch(e) { showToast(e.message||'Erro.', false); }
+}
+
+// ── Assignments ───────────────────────────────────────────────────────────────
+let _assPage = 1; let _assPages = 1;
+
+async function loadAssignments(page=1) {
+  _assPage = page;
+  const clientId = document.getElementById('assignFilterClient').value;
+  const search   = document.getElementById('assignFilterVM').value.trim();
+  const pageSize = 30;
+  const p = new URLSearchParams({ page, page_size: pageSize });
+  if (clientId) p.set('client_id', clientId);
+  if (search)   p.set('search', search);
+
+  const tbody = document.getElementById('assignTable');
+  try {
+    const data = await apiFetch('/api/admin/vm-rpo-assignments?' + p);
+    _assPages = data.total_pages;
+    document.getElementById('assignCount').textContent = data.total;
+
+    if (!data.assignments.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-3 small">Nenhuma atribuição encontrada.</td></tr>`;
+      document.getElementById('assignPagination').style.display='none';
+      return;
+    }
+
+    tbody.innerHTML = data.assignments.map(a => `<tr>
+      <td class="ps-3 fw-semibold small">${esc(a.vm_name)}</td>
+      <td class="small text-muted">${esc(a.client_name)}</td>
+      <td class="text-center"><span class="badge bg-primary" style="font-size:.78rem">${fmtH(a.expected_minutes)}</span></td>
+      <td class="text-center small">${esc(a.policy_name||'Personalizado')}</td>
+      <td class="text-center">${SEV_BADGE[a.criticality]||'<span class="text-muted small">—</span>'}</td>
+      <td class="text-muted small">${esc(a.notes||'—')}</td>
+      <td class="text-center">
+        <button class="btn btn-link btn-sm p-0 text-primary me-1" onclick="editAssignment(${JSON.stringify(a)})" title="Editar"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-link btn-sm p-0 text-danger" onclick="deleteAssignment(${a.id})" title="Excluir"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`).join('');
+
+    // Pagination
+    const pag = document.getElementById('assignPagination');
+    if (data.total_pages > 1) {
+      pag.style.display='';
+      document.getElementById('assignPaginationInfo').textContent =
+        `${(page-1)*pageSize+1}–${Math.min(page*pageSize,data.total)} de ${data.total}`;
+      document.getElementById('assPageIndicator').textContent = `${page}/${data.total_pages}`;
+      document.getElementById('btnAssFirst').disabled = page<=1;
+      document.getElementById('btnAssPrev').disabled  = page<=1;
+      document.getElementById('btnAssNext').disabled  = page>=data.total_pages;
+      document.getElementById('btnAssLast').disabled  = page>=data.total_pages;
+    } else { pag.style.display='none'; }
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-danger p-3 small">Erro ao carregar.</td></tr>`;
+  }
+}
+
+function showAssignForm(prefill={}) {
+  document.getElementById('assignId').value       = prefill.id||'';
+  document.getElementById('assignClient').value   = prefill.client_id||'';
+  document.getElementById('assignVM').value       = prefill.vm_name||'';
+  document.getElementById('assignPolicy').value   = prefill.rpo_policy_id||'';
+  document.getElementById('assignMinutes').value  = prefill.expected_minutes||'';
+  document.getElementById('assignCriticality').value = prefill.criticality||'';
+  document.getElementById('assignNotes').value    = prefill.notes||'';
+  updateMinutesHint('assignMinutes','assignMinutesHint');
+  document.getElementById('assignForm').classList.remove('d-none');
+  document.getElementById('assignVM').focus();
+}
+function hideAssignForm() { document.getElementById('assignForm').classList.add('d-none'); }
+
+function editAssignment(a) { showAssignForm(a); }
+
+document.getElementById('assignMinutes').addEventListener('input', function() {
+  updateMinutesHint('assignMinutes','assignMinutesHint');
+});
+
+function onPolicyChange() {
+  const sel = document.getElementById('assignPolicy');
+  const opt = sel.options[sel.selectedIndex];
+  const mins = opt?.dataset?.minutes;
+  if (mins) {
+    document.getElementById('assignMinutes').value = mins;
+    updateMinutesHint('assignMinutes','assignMinutesHint');
+  }
+}
+
+document.getElementById('btnSaveAssign').addEventListener('click', async () => {
+  const id       = document.getElementById('assignId').value;
+  const clientId = parseInt(document.getElementById('assignClient').value)||0;
+  const vmName   = document.getElementById('assignVM').value.trim();
+  const minutes  = parseInt(document.getElementById('assignMinutes').value)||0;
+  const polId    = parseInt(document.getElementById('assignPolicy').value)||null;
+  if (!clientId) { alert('Selecione o cliente.'); return; }
+  if (!vmName)   { alert('Informe o nome da VM.'); return; }
+  if (!minutes)  { alert('Informe os minutos.'); return; }
+  const data = {
+    client_id: clientId, vm_name: vmName,
+    expected_minutes: minutes,
+    rpo_policy_id: polId,
+    criticality: document.getElementById('assignCriticality').value||null,
+    notes: document.getElementById('assignNotes').value.trim()||null,
+  };
+  try {
+    await apiFetch('/api/rpo-assignment', 'POST', data);
+    showToast('Atribuição salva.');
+    hideAssignForm();
+    await loadAssignments(_assPage);
+  } catch(e) { showToast(e.message||'Erro.', false); }
+});
+
+async function deleteAssignment(id) {
+  if (!confirm('Remover esta atribuição de RPO?')) return;
+  try {
+    await apiFetch(`/api/rpo-assignment/${id}`, 'DELETE');
+    showToast('Atribuição removida.');
+    await loadAssignments(_assPage);
+  } catch(e) { showToast(e.message||'Erro.', false); }
+}
+
+document.getElementById('btnAssFirst').addEventListener('click', ()=>loadAssignments(1));
+document.getElementById('btnAssPrev').addEventListener('click',  ()=>loadAssignments(_assPage-1));
+document.getElementById('btnAssNext').addEventListener('click',  ()=>loadAssignments(_assPage+1));
+document.getElementById('btnAssLast').addEventListener('click',  ()=>loadAssignments(_assPages));
+
+let _assignSearchTimer = null;
+document.getElementById('assignFilterVM').addEventListener('input', function() {
+  clearTimeout(_assignSearchTimer);
+  _assignSearchTimer = setTimeout(()=>loadAssignments(1), 400);
+});
+document.getElementById('assignFilterClient').addEventListener('change', ()=>loadAssignments(1));
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadPolicies();
+loadAssignments(1);
+</script>
+{% endblock %}

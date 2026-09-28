@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Gestão de Usuários — Veeam Reporter{% endblock %}
+
+{% block content %}
+
+<!-- Cabeçalho -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+  <div class="d-flex align-items-center gap-2">
+    <div style="width:36px;height:36px;background:var(--hi-primary);border-radius:8px;display:flex;align-items:center;justify-content:center">
+      <i class="bi bi-people-fill text-white"></i>
+    </div>
+    <div>
+      <h5 class="mb-0 fw-bold">Gestão de Usuários</h5>
+      <p class="text-muted small mb-0">{{ users | length }} usuário(s) cadastrado(s)</p>
+    </div>
+  </div>
+  <a href="/admin/users/new" class="btn btn-primary">
+    <i class="bi bi-person-plus me-1"></i>Novo Usuário
+  </a>
+</div>
+
+<!-- Alertas de ação -->
+{% set msg = request.query_params.get('msg', '') %}
+{% set err = request.query_params.get('err', '') %}
+
+{% if msg == 'criado' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+  <i class="bi bi-check-circle-fill me-2"></i>Usuário criado com sucesso.
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% elif msg == 'editado' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+  <i class="bi bi-check-circle-fill me-2"></i>Usuário atualizado.
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% elif msg == 'excluido' %}
+<div class="alert alert-info alert-dismissible fade show" role="alert">
+  <i class="bi bi-trash me-2"></i>Usuário excluído.
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+{% if err == 'self_disable' %}
+<div class="alert alert-warning">Não é possível desativar sua própria conta.</div>
+{% elif err == 'self_delete' %}
+<div class="alert alert-warning">Não é possível excluir sua própria conta.</div>
+{% elif err == 'last_admin' %}
+<div class="alert alert-danger">Não é possível excluir o único administrador do sistema.</div>
+{% endif %}
+
+<!-- Senha temporária gerada -->
+{% if temp_pwd %}
+<div class="alert alert-warning border-warning shadow-sm">
+  <div class="d-flex align-items-start gap-2">
+    <i class="bi bi-key-fill fs-5 mt-1 text-warning"></i>
+    <div>
+      <strong>Senha temporária gerada para <code>{{ temp_pwd_user }}</code></strong><br>
+      <span class="text-danger fw-bold fs-5 font-monospace">{{ temp_pwd }}</span><br>
+      <small class="text-muted">Copie agora — esta senha não será exibida novamente. O usuário deverá trocá-la no próximo login.</small>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Tabela de usuários -->
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Usuário</th>
+          <th>Nome / E-mail</th>
+          <th class="text-center">Perfil</th>
+          <th class="text-center">Status</th>
+          <th class="text-center">Senha</th>
+          <th>Último Login</th>
+          <th class="text-center">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="{{ 'table-secondary opacity-60' if not u.is_active else '' }}">
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              <div style="width:32px;height:32px;border-radius:50%;background:{{ '#7C3AED' if u.is_admin else '#6c757d' }};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <i class="bi bi-person-fill text-white" style="font-size:.8rem"></i>
+              </div>
+              <div>
+                <div class="fw-semibold small">{{ u.username }}</div>
+                {% if u.must_change_password %}
+                <span class="badge bg-warning text-dark" style="font-size:.65rem">Deve trocar senha</span>
+                {% endif %}
+              </div>
+            </div>
+          </td>
+          <td>
+            <div class="small">{{ u.full_name or '—' }}</div>
+            {% if u.email %}
+            <div class="text-muted" style="font-size:.75rem">{{ u.email }}</div>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if u.is_admin %}
+            <span class="badge bg-warning text-dark">
+              <i class="bi bi-shield-fill me-1"></i>Admin
+            </span>
+            {% else %}
+            <span class="badge bg-secondary">Usuário</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if u.is_active %}
+              {% if u.locked_until and u.locked_until > now %}
+              <span class="badge bg-danger">
+                <i class="bi bi-lock-fill me-1"></i>Bloqueado
+              </span>
+              {% else %}
+              <span class="badge bg-success">Ativo</span>
+              {% endif %}
+            {% else %}
+            <span class="badge bg-secondary">Inativo</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if u.password_expires_at %}
+              {% if u.password_expires_at < now %}
+              <span class="badge bg-danger" title="Expirada em {{ u.password_expires_at.strftime('%d/%m/%Y') }}">
+                <i class="bi bi-exclamation-triangle me-1"></i>Expirada
+              </span>
+              {% else %}
+              <span class="badge bg-light text-dark border" style="font-size:.7rem" title="Expira em {{ u.password_expires_at.strftime('%d/%m/%Y') }}">
+                <i class="bi bi-clock me-1"></i>{{ u.password_expires_at.strftime('%d/%m/%y') }}
+              </span>
+              {% endif %}
+            {% else %}
+            <span class="text-muted small">Não expira</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="small">
+              {{ u.last_login.strftime('%d/%m/%Y %H:%M') if u.last_login else 'Nunca' }}
+            </div>
+            {% if u.created_by %}
+            <div class="text-muted" style="font-size:.72rem">Criado por {{ u.created_by }}</div>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            <div class="d-flex gap-1 justify-content-center flex-wrap">
+              <!-- Editar -->
+              <a href="/admin/users/{{ u.id }}/edit"
+                 class="btn btn-sm btn-outline-primary" title="Editar">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <!-- Resetar senha -->
+              <form method="post" action="/admin/users/{{ u.id }}/reset-password"
+                    onsubmit="return confirm('Gerar senha temporária para {{ u.username }}?')">
+                <button type="submit" class="btn btn-sm btn-outline-warning" title="Resetar senha">
+                  <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+              </form>
+              <!-- Ativar / Desativar -->
+              <form method="post" action="/admin/users/{{ u.id }}/toggle"
+                    onsubmit="return confirm('{{ 'Desativar' if u.is_active else 'Ativar' }} o usuário {{ u.username }}?')">
+                <button type="submit"
+                        class="btn btn-sm {{ 'btn-outline-secondary' if u.is_active else 'btn-outline-success' }}"
+                        title="{{ 'Desativar' if u.is_active else 'Ativar' }}">
+                  <i class="bi {{ 'bi-pause-circle' if u.is_active else 'bi-play-circle' }}"></i>
+                </button>
+              </form>
+              <!-- Excluir -->
+              {% if u.username != request.state.username %}
+              <form method="post" action="/admin/users/{{ u.id }}/delete"
+                    onsubmit="return confirm('Excluir permanentemente o usuário {{ u.username }}? Esta ação não pode ser desfeita.')">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Resumo da Importação de Offload — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="page-title mb-0">
+        {% if imp.status == 'completed' %}
+        <i class="bi bi-check-circle-fill text-success me-2"></i>Importação concluída
+        {% else %}
+        <i class="bi bi-x-circle-fill text-danger me-2"></i>Erro na importação
+        {% endif %}
+      </h2>
+      <div class="d-flex gap-2">
+        <a href="/offload/import" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-upload me-1"></i>Nova importação
+        </a>
+        <a href="/offload/history" class="btn btn-outline-primary btn-sm">
+          <i class="bi bi-clock-history me-1"></i>Histórico
+        </a>
+      </div>
+    </div>
+
+    <!-- Detalhes da carga -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle me-2 text-primary"></i>Detalhes da carga
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="small text-muted">Cliente</div>
+            <div class="fw-semibold">{{ client.name if client else '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Arquivo</div>
+            <div class="fw-semibold">{{ imp.original_filename }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Importado em</div>
+            <div class="fw-semibold">
+              {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+              {% if imp.uploaded_by %}
+              <span class="text-muted small">por {{ imp.uploaded_by }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Tamanho do arquivo</div>
+            <div class="fw-semibold">
+              {% if imp.file_size_bytes %}
+              {{ "%.1f MB" | format(imp.file_size_bytes / (1024*1024)) }}
+              {% else %}—{% endif %}
+            </div>
+          </div>
+          {% if imp.min_started_at and imp.max_started_at %}
+          <div class="col-12">
+            <div class="small text-muted">Período detectado nas execuções</div>
+            <div class="fw-semibold">
+              <i class="bi bi-calendar-range me-1 text-primary"></i>
+              {{ imp.min_started_at.strftime('%d/%m/%Y') }}
+              → {{ imp.max_started_at.strftime('%d/%m/%Y') }}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- KPIs de sessões -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-primary">
+              {{ (imp.total_lines or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Linhas lidas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-success">
+              {{ (imp.inserted_sessions or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Novas inseridas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-secondary bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-secondary">
+              {{ (imp.duplicate_sessions or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Duplicatas ignoradas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-warning bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-warning">
+              {{ (imp.ignored_lines or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Linhas ignoradas</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resultado das execuções -->
+    {% if imp.success_count or imp.warning_count or imp.failed_count %}
+    <div class="row g-2 mb-4">
+      {% if imp.success_count %}
+      <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <i class="bi bi-check-circle fs-4 text-success"></i>
+            <div>
+              <div class="fw-semibold small">Execuções com sucesso</div>
+              <div class="text-muted small">{{ imp.success_count | format_number }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% if imp.warning_count %}
+      <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <i class="bi bi-exclamation-triangle fs-4 text-warning"></i>
+            <div>
+              <div class="fw-semibold small">Com aviso</div>
+              <div class="text-muted small">{{ imp.warning_count | format_number }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% if imp.failed_count %}
+      <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <i class="bi bi-x-circle fs-4 text-danger"></i>
+            <div>
+              <div class="fw-semibold small">Com falha</div>
+              <div class="text-muted small">{{ imp.failed_count | format_number }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if imp.status_message %}
+    <div class="alert {% if imp.status == 'completed' %}alert-info{% else %}alert-danger{% endif %} small mb-0">
+      <i class="bi bi-{% if imp.status == 'completed' %}lightbulb{% else %}exclamation-triangle{% endif %} me-2"></i>
+      {{ imp.status_message }}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

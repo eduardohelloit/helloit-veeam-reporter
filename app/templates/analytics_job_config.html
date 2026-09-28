@@ -1,0 +1,705 @@
+{% extends "base.html" %}
+{% block title %}Auditoria de Configuração de Rotinas — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-gear-wide-connected me-2"></i>Auditoria de Configuração de Rotinas
+  </h2>
+  <div class="d-flex gap-2">
+    <a href="#" id="btnExportExcel" class="btn btn-outline-success btn-sm" target="_blank">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+    </a>
+    <a href="/job-config/import" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-upload me-1"></i>Importar
+    </a>
+  </div>
+</div>
+
+{# ── Filtros ──────────────────────────────────────────────────────────────── #}
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-end">
+
+      {% if clients | length > 1 %}
+      <div class="col-md-3">
+        <label class="form-label fw-semibold small mb-1">Cliente</label>
+        <select id="fClient" class="form-select form-select-sm">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% else %}
+      <input type="hidden" id="fClient" value="{{ clients[0].id if clients else '' }}">
+      {% endif %}
+
+      <div class="col-md-3">
+        <label class="form-label fw-semibold small mb-1">Buscar rotina</label>
+        <input type="text" id="fSearch" class="form-control form-control-sm"
+               placeholder="Ex.: SRV-EXEMPLO">
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">Tipo</label>
+        <select id="fJobType" class="form-select form-select-sm">
+          <option value="">Todos</option>
+          {% for t in job_types %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">GIP</label>
+        <select id="fGip" class="form-select form-select-sm">
+          <option value="">Qualquer</option>
+          <option value="selected">Manual (Selected)</option>
+          <option value="automatic">Automático</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">SQL Log</label>
+        <select id="fSql" class="form-select form-select-sm">
+          <option value="">Qualquer</option>
+          <option value="enabled">Com log backup</option>
+          <option value="disabled">Sem log backup</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">App-Aware</label>
+        <select id="fAap" class="form-select form-select-sm">
+          <option value="">Qualquer</option>
+          <option value="ok">Habilitado</option>
+          <option value="fail">Desabilitado</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">Imutável</label>
+        <select id="fImmutable" class="form-select form-select-sm">
+          <option value="">Qualquer</option>
+          <option value="yes">Sim</option>
+          <option value="no">Não</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1">Status</label>
+        <select id="fDisabled" class="form-select form-select-sm">
+          <option value="">Todas</option>
+          <option value="yes">Somente desabilitadas</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold small mb-1"
+               title="Rotinas que geram full (sintético ou ativo) no dia escolhido">
+          Full no dia
+        </label>
+        <select id="fFullDay" class="form-select form-select-sm">
+          <option value="">Qualquer dia</option>
+          <option value="monday">Segunda</option>
+          <option value="tuesday">Terça</option>
+          <option value="wednesday">Quarta</option>
+          <option value="thursday">Quinta</option>
+          <option value="friday">Sexta</option>
+          <option value="saturday">Sábado</option>
+          <option value="sunday">Domingo</option>
+        </select>
+      </div>
+
+      <div class="col-md-2 d-flex gap-2">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnSearch">
+          <i class="bi bi-search me-1"></i>Filtrar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnReset" title="Limpar filtros">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{# ── Cards de conformidade ────────────────────────────────────────────────── #}
+<div class="row g-3 mb-4" id="summaryCards" style="display:none!important;">
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-primary" id="sumTotal">—</div>
+        <div class="small text-muted">Rotinas</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-success" id="sumAap">—</div>
+        <div class="small text-muted">Com App-Aware</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100 bg-info bg-opacity-10">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-info" id="sumSql">—</div>
+        <div class="small text-muted">VMs c/ SQL Log</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100 bg-warning bg-opacity-10">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-warning" id="sumGip">—</div>
+        <div class="small text-muted">GIP Manual</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-success" id="sumImmutable">—</div>
+        <div class="small text-muted">Imutável</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-2">
+    <div class="card text-center border-0 shadow-sm h-100 bg-danger bg-opacity-10">
+      <div class="card-body py-2">
+        <div class="fs-3 fw-bold text-danger" id="sumDisabled">—</div>
+        <div class="small text-muted">Desabilitadas</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Grid de rotinas ──────────────────────────────────────────────────────── #}
+<div class="card shadow-sm" id="gridCard" style="display:none;">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span class="fw-semibold">
+      <i class="bi bi-table me-1"></i>
+      Rotinas — <span id="gridCount" class="text-muted small">0</span>
+    </span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover table-sm mb-0" id="gridTable">
+      <thead class="table-light sticky-top">
+        <tr>
+          <th>Rotina</th>
+          <th>Tipo</th>
+          <th class="text-center">Ativa</th>
+          <th>Horário</th>
+          <th>Repositório</th>
+          <th class="text-center">Imutável</th>
+          <th class="text-center">GIP</th>
+          <th class="text-center">App-Aware</th>
+          <th class="text-center">VMs SQL Log</th>
+          <th>Retenção</th>
+          <th>Full (quando)</th>
+          <th>Coletado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="gridBody"></tbody>
+    </table>
+  </div>
+</div>
+
+{# ── Estado inicial ───────────────────────────────────────────────────────── #}
+<div id="emptyState" class="text-center py-5 text-muted">
+  <i class="bi bi-funnel fs-1 d-block mb-3 opacity-25"></i>
+  Selecione os filtros e clique em <strong>Filtrar</strong> para visualizar as rotinas.
+</div>
+<div id="noResults" class="text-center py-4 text-muted" style="display:none;">
+  <i class="bi bi-search fs-1 d-block mb-2 opacity-25"></i>
+  Nenhuma rotina encontrada para os filtros selecionados.
+</div>
+<div id="loadingState" class="text-center py-4" style="display:none;">
+  <div class="spinner-border text-primary"></div>
+  <div class="mt-2 text-muted small">Carregando...</div>
+</div>
+
+{# ── Modal de detalhe ─────────────────────────────────────────────────────── #}
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="detailModalTitle">Detalhes da Rotina</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailModalBody">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const yn = v => v === true ? '<span class="badge bg-success">Sim</span>'
+               : v === false ? '<span class="badge bg-danger">Não</span>'
+               : '<span class="text-muted">—</span>';
+
+const ynText = v => v === true ? 'Sim' : v === false ? 'Não' : '—';
+
+function buildParams() {
+  const p = new URLSearchParams();
+  const fClient = document.getElementById('fClient');
+  const cv = fClient ? fClient.value : '';
+  if (cv) p.set('client_id', cv);
+  const s = document.getElementById('fSearch').value.trim();
+  if (s) p.set('search', s);
+  const jt = document.getElementById('fJobType').value;
+  if (jt) p.set('job_type', jt);
+  const gip = document.getElementById('fGip').value;
+  if (gip) p.set('gip_filter', gip);
+  const sql = document.getElementById('fSql').value;
+  if (sql) p.set('sql_filter', sql);
+  const aap = document.getElementById('fAap').value;
+  if (aap) p.set('aap_filter', aap);
+  const imm = document.getElementById('fImmutable').value;
+  if (imm) p.set('immutable_filter', imm);
+  const dis = document.getElementById('fDisabled').value;
+  if (dis) p.set('disabled_filter', dis);
+  const fd = document.getElementById('fFullDay').value;
+  if (fd) p.set('full_day', fd);
+  return p;
+}
+
+async function loadSummary(params) {
+  try {
+    const resp = await fetch('/api/job-config/analytics/summary?' + params);
+    if (!resp.ok) return;
+    const d = await resp.json();
+    document.getElementById('sumTotal').textContent = d.total;
+    document.getElementById('sumAap').textContent = d.aap_ok;
+    document.getElementById('sumSql').textContent = d.sql_log_enabled;
+    document.getElementById('sumGip').textContent = d.gip_manual;
+    document.getElementById('sumImmutable').textContent = d.sobr_immutable;
+    document.getElementById('sumDisabled').textContent = d.disabled;
+    document.getElementById('summaryCards').style.removeProperty('display');
+  } catch(e) {}
+}
+
+async function loadGrid() {
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('noResults').style.display = 'none';
+  document.getElementById('gridCard').style.display = 'none';
+  document.getElementById('loadingState').style.display = '';
+
+  const params = buildParams();
+
+  try {
+    const resp = await fetch('/api/job-config/analytics/snapshots?' + params);
+    document.getElementById('loadingState').style.display = 'none';
+    if (!resp.ok) { document.getElementById('emptyState').style.display = ''; return; }
+    const rows = await resp.json();
+
+    if (!rows.length) {
+      document.getElementById('noResults').style.display = '';
+      return;
+    }
+
+    // Atualiza URL do Excel
+    const excelParams = new URLSearchParams(params);
+    excelParams.delete('gip_filter');
+    excelParams.delete('sql_filter');
+    excelParams.delete('aap_filter');
+    excelParams.delete('immutable_filter');
+    excelParams.delete('disabled_filter');
+    document.getElementById('btnExportExcel').href =
+      '/api/job-config/analytics/export-excel?' + excelParams;
+
+    const tbody = document.getElementById('gridBody');
+    tbody.innerHTML = '';
+    rows.forEach(r => {
+      const immBadge = r.immutable
+        ? '<span class="badge bg-success">Sim</span>'
+        : '<span class="badge bg-secondary">Não</span>';
+      const aapBadge = r.aap_enabled === true
+        ? '<span class="badge bg-success">OK</span>'
+        : r.aap_enabled === false
+          ? '<span class="badge bg-danger">Não</span>'
+          : '<span class="text-muted">—</span>';
+      // "—" = coletado sem esse campo; "Nenhum" = só incrementais
+      const fw = r.full_when || '—';
+      const fullWhen = (fw === '—' || fw === 'Nenhum')
+        ? `<span class="text-muted">${fw}</span>`
+        : fw;
+      const sqlBadge = r.sql_vms > 0
+        ? `<span class="badge bg-info text-dark">${r.sql_vms} VM(s)</span>`
+        : '<span class="text-muted small">—</span>';
+      const gipBadge = r.gip_mode === 'Selected'
+        ? '<span class="badge bg-warning text-dark">Manual</span>'
+        : r.gip_mode === 'Automatic'
+          ? '<span class="badge bg-secondary">Auto</span>'
+          : '<span class="text-muted">—</span>';
+      const enabledIcon = r.is_enabled === false
+        ? '<i class="bi bi-x-circle-fill text-danger" title="Desabilitada"></i>'
+        : '<i class="bi bi-check-circle-fill text-success" title="Habilitada"></i>';
+      const ret = r.retention || '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="fw-semibold small">${r.job_name}</td>
+        <td class="small text-muted">${r.job_type || '—'}</td>
+        <td class="text-center">${enabledIcon}</td>
+        <td class="small">${r.sched_time || '—'}</td>
+        <td class="small text-muted text-truncate" style="max-width:160px;" title="${r.repo || ''}">${r.repo || '—'}</td>
+        <td class="text-center">${immBadge}</td>
+        <td class="text-center">${gipBadge}</td>
+        <td class="text-center">${aapBadge}</td>
+        <td class="text-center">${sqlBadge}</td>
+        <td class="small">${ret}${r.gfs ? ' <i class="bi bi-infinity text-muted" title="GFS habilitado"></i>' : ''}</td>
+        <td class="small text-nowrap">${fullWhen}</td>
+        <td class="small text-muted">${r.collected_at || '—'}</td>
+        <td>
+          <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openDetail(${r.id}, '${r.job_name.replace(/'/g,"\\'")}')">
+            <i class="bi bi-zoom-in"></i>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('gridCount').textContent = rows.length + ' rotinas';
+    document.getElementById('gridCard').style.display = '';
+
+    // Summary com params básicos (sem filtros de coluna)
+    const sumParams = new URLSearchParams();
+    const fClient = document.getElementById('fClient');
+    if (fClient && fClient.value) sumParams.set('client_id', fClient.value);
+    loadSummary(sumParams);
+
+  } catch(e) {
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('emptyState').style.display = '';
+  }
+}
+
+async function openDetail(snapId, jobName) {
+  const modal = new bootstrap.Modal(document.getElementById('detailModal'));
+  document.getElementById('detailModalTitle').textContent = jobName;
+  document.getElementById('detailModalBody').innerHTML =
+    '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+  modal.show();
+
+  try {
+    const resp = await fetch(`/api/job-config/analytics/snapshot/${snapId}`);
+    if (!resp.ok) throw new Error('não encontrado');
+    const data = await resp.json();
+    const s = data.snapshot;
+    const objs = data.objects;
+
+    const yn2 = v => v === true ? '<span class="text-success fw-semibold">Sim</span>'
+                   : v === false ? '<span class="text-danger">Não</span>'
+                   : '<span class="text-muted">—</span>';
+    const val = v => (v === null || v === undefined) ? '<span class="text-muted">—</span>' : v;
+
+    // Retenção do log SQL por objeto:
+    //  - se não faz log backup -> "—"
+    //  - se "use_db_retention" (Until image-level backup is deleted) -> acompanha o backup
+    //  - senão -> N dias (Keep only last N days)
+    const sqlRetText = (o) => {
+      if (!o.sql_log_backup) return '<span class="text-muted">—</span>';
+      if (o.sql_use_db_retention) return '<span title="Mantém até o backup de imagem ser apagado">Conforme backup</span>';
+      return o.sql_retain_days ? o.sql_retain_days + ' d' : '<span class="text-muted">—</span>';
+    };
+
+    // Objetos com SQL log
+    const objRows = objs.map(o => `
+      <tr>
+        <td class="small fw-semibold">${o.name}</td>
+        <td class="small text-muted">${o.type || '—'}</td>
+        <td class="small">${o.size || '—'}</td>
+        <td class="text-center">${yn2(o.aap)}</td>
+        <td class="small">${o.sql_mode || '—'}</td>
+        <td class="text-center">${yn2(o.sql_log_backup)}</td>
+        <td class="text-center small">${o.sql_freq_min ? o.sql_freq_min + ' min' : '—'}</td>
+        <td class="text-center small">${sqlRetText(o)}</td>
+      </tr>
+    `).join('');
+
+    // GFS — monta texto dos níveis habilitados (semanal/mensal/anual)
+    const gfsParts = [];
+    if (s.retention.gfs_weekly)  gfsParts.push(`${s.retention.gfs_weekly} sem.`);
+    if (s.retention.gfs_monthly) gfsParts.push(`${s.retention.gfs_monthly} mensais`);
+    if (s.retention.gfs_yearly)  gfsParts.push(`${s.retention.gfs_yearly} anuais`);
+    const gfsText = s.retention.gfs_enabled
+      ? `<span class="text-success fw-semibold">Sim</span>${gfsParts.length ? ' <span class="small text-muted">(' + gfsParts.join(', ') + ')</span>' : ''}`
+      : '<span class="text-muted">Não</span>';
+
+    // Proxies de processamento + transporte + GIP (nomes)
+    const fmtList = (arr) => (Array.isArray(arr) && arr.length)
+      ? arr.map(x => `<span class="badge bg-light text-dark border me-1 mb-1">${x}</span>`).join('')
+      : '<span class="text-muted">—</span>';
+    const proxyNames     = fmtList(s.backup_proxy.selected_names);
+    const transportModes = fmtList(s.backup_proxy.transport_modes);
+    const gipNames       = fmtList(s.gip.selected_names);
+
+    // Repositório: performance tier (extents) + capacity tier
+    const rep = s.repository;
+    const perfTierText = (rep.extent_count)
+      ? `${rep.extent_count} extent(s)${Array.isArray(rep.extent_names) && rep.extent_names.length ? ': <span class="text-muted">' + rep.extent_names.join(', ') + '</span>' : ''}`
+      : '<span class="text-muted">—</span>';
+    let capTierText = '<span class="text-muted">—</span>';
+    if (rep.capacity_name) {
+      const capImm = rep.capacity_immutable
+        ? `<span class="text-success">imutável${rep.capacity_immut_days ? ' ' + rep.capacity_immut_days + 'd' : ''}</span>`
+        : '<span class="text-danger">sem imutabilidade</span>';
+      capTierText = `${rep.capacity_name} <span class="small">(${capImm})</span>`;
+    }
+
+    // Schedule periódico: "a cada N <unidade>"
+    const perUnitMap = { Hours: 'horas', Minutes: 'min', Seconds: 'seg' };
+    const perUnit = perUnitMap[s.schedule.periodically_unit] || (s.schedule.periodically_unit || '');
+    const schedText = s.schedule.periodically_enabled
+      ? `A cada ${s.schedule.periodically_every} ${perUnit}`
+      : (s.schedule.daily_time ? val(s.schedule.daily_time) : 'Não');
+
+    document.getElementById('detailModalBody').innerHTML = `
+      <div class="row g-3">
+
+        <div class="col-md-6">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-calendar3 me-1 text-primary"></i>Schedule</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Execução</td><td class="small fw-semibold">${schedText}</td></tr>
+                <tr><td class="text-muted small">Dias</td><td class="small">${val(s.schedule.days_of_week)}</td></tr>
+                <tr><td class="text-muted small">Retry</td><td class="small">${s.schedule.retry_enabled ? s.schedule.retry_count + 'x' : 'Não'}</td></tr>
+                <tr><td class="text-muted small">Chain</td><td class="small">${val(s.schedule.chain_job)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-server me-1 text-primary"></i>Repositório</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Nome</td><td class="small">${val(s.repository.name)}</td></tr>
+                <tr><td class="text-muted small">SOBR</td><td>${yn2(s.repository.is_sobr)} ${s.repository.sobr_name ? '<span class="small text-muted">(' + s.repository.sobr_name + ')</span>' : ''}</td></tr>
+                <tr><td class="text-muted small align-top">Performance tier</td><td class="small">${perfTierText}</td></tr>
+                <tr><td class="text-muted small">Imutável (perf.)</td><td>${yn2(s.repository.immutability)}</td></tr>
+                <tr><td class="text-muted small">Linux Hardened</td><td>${yn2(s.repository.linux_hardened)}</td></tr>
+                <tr><td class="text-muted small align-top">Capacity tier</td><td class="small">${capTierText}</td></tr>
+                <tr><td class="text-muted small">Por VM</td><td>${yn2(s.repository.per_vm_files)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-hdd-network me-1 text-primary"></i>Proxy / GIP</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Modo</td><td class="small">${val(s.backup_proxy.mode)} ${s.backup_proxy.automatic ? '<span class="badge bg-secondary">Auto</span>' : ''}</td></tr>
+                <tr><td class="text-muted small align-top">Proxies</td><td class="small">${proxyNames}</td></tr>
+                <tr><td class="text-muted small align-top">Transporte</td><td class="small">${transportModes}</td></tr>
+                <tr><td class="text-muted small">GIP Mode</td><td class="small">${val(s.gip.mode)} ${s.gip.automatic ? '<span class="badge bg-secondary">Auto</span>' : ''}</td></tr>
+                <tr><td class="text-muted small align-top">GIP Proxy</td><td class="small">${gipNames}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-shield-check me-1 text-primary"></i>Application-Aware / SQL</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">App-Aware</td><td>${yn2(s.application_aware.enabled)}</td></tr>
+                <tr><td class="text-muted small">Modo</td><td class="small">${val(s.application_aware.mode)}</td></tr>
+                <tr><td class="text-muted small">Require Success</td><td>${yn2(s.application_aware.require_success)}</td></tr>
+                <tr><td class="text-muted small">VMTools Quiesce</td><td>${yn2(s.application_aware.vmtools_quiesce)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-arrow-repeat me-1 text-primary"></i>Retenção</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Retenção</td><td class="small fw-semibold">${val(s.retention.effective)}</td></tr>
+                <tr><td class="text-muted small">Política</td><td class="small">${val(s.retention.storage_type)}</td></tr>
+                <tr><td class="text-muted small">GFS</td><td class="small">${gfsText}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-database me-1 text-primary"></i>SQL Tx Log (padrão job)</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Detectado</td><td>${yn2(s.sql_default.detected)}</td></tr>
+                <tr><td class="text-muted small">Modo</td><td class="small">${val(s.sql_default.tx_mode)}</td></tr>
+                <tr><td class="text-muted small">Log Backup (padrão)</td><td>${yn2(s.sql_default.log_backup_enabled)}</td></tr>
+                <tr><td class="text-muted small">Override por VM</td><td>${yn2(s.sql_default.per_object_detected)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-box me-1 text-primary"></i>Storage</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Compressão</td><td class="small">${val(s.storage.compression)}</td></tr>
+                <tr><td class="text-muted small">Block Size</td><td class="small">${val(s.storage.block_size)}</td></tr>
+                <tr><td class="text-muted small">Dedup</td><td>${yn2(s.storage.dedup)}</td></tr>
+                <tr><td class="text-muted small">Criptografia</td><td>${yn2(s.storage.encryption)}</td></tr>
+                <tr><td class="text-muted small">CBT</td><td>${yn2(s.storage.cbt)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card border-0 bg-light h-100">
+            <div class="card-body">
+              <h6 class="fw-bold mb-3"><i class="bi bi-arrow-repeat me-1 text-primary"></i>Fulls (quando roda)</h6>
+              <table class="table table-sm table-borderless mb-0">
+                <tr><td class="text-muted small">Modo</td><td class="small">${val(s.full && s.full.algorithm)}</td></tr>
+                <tr><td class="text-muted small">Full sintético</td><td class="small">${val(s.full && s.full.synthetic.display)}</td></tr>
+                <tr><td class="text-muted small">Full ativo</td><td class="small">${val(s.full && s.full.active.display)}</td></tr>
+                <tr><td class="text-muted small">Compact full</td><td class="small">${val(s.full && s.full.compact.display)}</td></tr>
+                <tr><td class="text-muted small">Rollbacks</td><td>${yn2(s.full && s.full.rollbacks)}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      ${objs.length > 0 ? `
+      <hr class="my-3">
+      <h6 class="fw-bold mb-2"><i class="bi bi-pc-display me-1 text-primary"></i>Objetos / VMs (${objs.length})</h6>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>VM</th><th>Tipo</th><th>Tamanho</th>
+              <th class="text-center">App-Aware</th>
+              <th>SQL Mode</th>
+              <th class="text-center">Log Backup</th>
+              <th class="text-center">Freq.</th>
+              <th class="text-center">Retenção</th>
+            </tr>
+          </thead>
+          <tbody>${objRows}</tbody>
+        </table>
+      </div>
+      ` : '<p class="text-muted small mt-3 mb-0">Nenhum objeto registrado para esta rotina.</p>'}
+
+      <hr class="my-3">
+      <div id="historyContainer">
+        <h6 class="fw-bold mb-2">
+          <i class="bi bi-clock-history me-1 text-primary"></i>Histórico de Alterações
+        </h6>
+        <div class="text-muted small"><span class="spinner-border spinner-border-sm me-2"></span>Carregando histórico...</div>
+      </div>
+    `;
+
+    // Histórico de alterações (lazy-load) — usa job_id (fallback job_name)
+    loadHistory(s.job_id, s.job_name);
+
+  } catch(e) {
+    document.getElementById('detailModalBody').innerHTML =
+      '<div class="alert alert-danger">Erro ao carregar detalhes.</div>';
+  }
+}
+
+async function loadHistory(jobId, jobName) {
+  const cont = document.getElementById('historyContainer');
+  if (!cont) return;
+  const params = new URLSearchParams();
+  if (jobId) params.set('job_id', jobId);
+  else if (jobName) params.set('job_name', jobName);
+
+  try {
+    const resp = await fetch('/api/job-config/analytics/history?' + params);
+    if (!resp.ok) throw new Error('falha');
+    const data = await resp.json();
+    const changes = data.changes || [];
+    const collections = data.collections || (data.snapshots || []).length;
+
+    let html = `<h6 class="fw-bold mb-2">
+        <i class="bi bi-clock-history me-1 text-primary"></i>Histórico de Alterações
+        <span class="badge bg-secondary ms-1">${collections} coleta(s)</span>
+      </h6>`;
+
+    if (collections <= 1) {
+      html += `<p class="text-muted small mb-0">Apenas uma coleta registrada — sem alterações para comparar.
+                Quando você importar novas coletas desta rotina, as mudanças aparecerão aqui.</p>`;
+    } else if (!changes.length) {
+      html += `<p class="text-muted small mb-0">Nenhuma alteração de configuração entre as ${collections} coletas.</p>`;
+    } else {
+      html += '<div class="timeline-changes">';
+      changes.forEach(ch => {
+        const rows = ch.diffs.map(d => `
+          <tr>
+            <td class="small fw-semibold" style="white-space:nowrap">${d.field}</td>
+            <td class="small text-danger"><s>${d.from === null || d.from === undefined ? '—' : d.from}</s></td>
+            <td class="small text-center text-muted">→</td>
+            <td class="small text-success fw-semibold">${d.to === null || d.to === undefined ? '—' : d.to}</td>
+          </tr>`).join('');
+        html += `
+          <div class="card border-0 bg-light mb-2">
+            <div class="card-body py-2 px-3">
+              <div class="small text-muted mb-1">
+                <i class="bi bi-calendar-event me-1"></i>
+                Coleta de <strong>${ch.date}</strong>
+                <span class="ms-1">(vs ${ch.from_date})</span>
+                — ${ch.diffs.length} alteração(ões)
+              </div>
+              <table class="table table-sm table-borderless mb-0"><tbody>${rows}</tbody></table>
+            </div>
+          </div>`;
+      });
+      html += '</div>';
+    }
+    cont.innerHTML = html;
+  } catch(e) {
+    cont.innerHTML = `<h6 class="fw-bold mb-2"><i class="bi bi-clock-history me-1 text-primary"></i>Histórico de Alterações</h6>
+      <p class="text-danger small mb-0">Erro ao carregar histórico.</p>`;
+  }
+}
+
+// ── Event listeners ──────────────────────────────────────────────────────────
+document.getElementById('btnSearch').addEventListener('click', loadGrid);
+document.getElementById('fSearch').addEventListener('keydown', e => { if (e.key === 'Enter') loadGrid(); });
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  ['fSearch','fJobType','fGip','fSql','fAap','fImmutable','fDisabled','fFullDay'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const fClient = document.getElementById('fClient');
+  if (fClient && fClient.tagName === 'SELECT') fClient.value = '';
+  document.getElementById('emptyState').style.display = '';
+  document.getElementById('gridCard').style.display = 'none';
+  document.getElementById('noResults').style.display = 'none';
+  document.getElementById('summaryCards').style.display = 'none';
+});
+
+// Auto-busca se houver um único cliente
+{% if clients | length == 1 %}
+document.addEventListener('DOMContentLoaded', loadGrid);
+{% endif %}
+</script>
+{% endblock %}

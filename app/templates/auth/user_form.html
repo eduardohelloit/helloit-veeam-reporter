@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% set is_edit = edit_user is not none %}
+{% block title %}{{ 'Editar' if is_edit else 'Novo' }} Usuário — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-md-7 col-lg-6">
+
+    <div class="d-flex align-items-center gap-2 mb-4">
+      <div style="width:36px;height:36px;background:var(--hi-primary);border-radius:8px;display:flex;align-items:center;justify-content:center">
+        <i class="bi bi-person-{{ 'gear' if is_edit else 'plus' }}-fill text-white"></i>
+      </div>
+      <div>
+        <h5 class="mb-0 fw-bold">{{ 'Editar Usuário' if is_edit else 'Novo Usuário' }}</h5>
+        {% if is_edit %}
+        <p class="text-muted small mb-0">{{ edit_user.username }}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if errors %}
+    <div class="alert alert-danger">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <ul class="mb-0 ps-3">
+        {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <form method="post"
+              action="{{ '/admin/users/' + edit_user.id|string + '/edit' if is_edit else '/admin/users/new' }}"
+              autocomplete="off" novalidate>
+
+          <!-- Usuário (somente criação) -->
+          {% if not is_edit %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">
+              Nome de usuário <span class="text-danger">*</span>
+            </label>
+            <input type="text" name="username" class="form-control"
+                   value="{{ form.username if form else '' }}"
+                   placeholder="ex.: joao.silva" required autofocus
+                   pattern="[A-Za-z0-9._\-]+" title="Letras, números, ponto, hífen e underscore">
+            <div class="form-text">Letras, números, ponto, hífen ou underscore. Sem espaços.</div>
+          </div>
+          {% endif %}
+
+          <!-- Nome completo -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Nome completo</label>
+            <input type="text" name="full_name" class="form-control"
+                   value="{{ edit_user.full_name if is_edit and edit_user.full_name else (form.full_name if form else '') }}"
+                   placeholder="ex.: João Silva"
+                   {% if not is_edit %}{% else %}autofocus{% endif %}>
+          </div>
+
+          <!-- E-mail -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">E-mail</label>
+            <input type="email" name="email" class="form-control"
+                   value="{{ edit_user.email if is_edit and edit_user.email else (form.email if form else '') }}"
+                   placeholder="ex.: joao@empresa.com">
+          </div>
+
+          <!-- Senha (somente criação) -->
+          {% if not is_edit %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">
+              Senha <span class="text-danger">*</span>
+            </label>
+            <div class="input-group">
+              <input type="password" name="password" id="password"
+                     class="form-control border-end-0"
+                     placeholder="••••••••" required oninput="checkStrength(this.value)">
+              <button type="button" class="input-group-text bg-white toggle-pwd" data-target="password">
+                <i class="bi bi-eye text-muted"></i>
+              </button>
+              <button type="button" class="input-group-text bg-white" id="genPwd" title="Gerar senha">
+                <i class="bi bi-magic text-primary"></i>
+              </button>
+            </div>
+            <div class="mt-1">
+              <div class="progress" style="height:4px">
+                <div id="strengthBar" class="progress-bar" style="width:0%"></div>
+              </div>
+              <small id="strengthLabel" class="text-muted"></small>
+            </div>
+          </div>
+
+          <!-- Requisitos de senha -->
+          <div class="alert alert-light border py-2 mb-3" style="font-size:.8rem">
+            <i class="bi bi-info-circle text-info me-1"></i>
+            <strong>Requisitos:</strong> {{ policy_items | join(", ") }}.
+          </div>
+          {% endif %}
+
+          <hr class="my-4">
+
+          <!-- Permissões -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Perfil de acesso</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="is_admin" value="0" id="roleUser"
+                       {{ 'checked' if (is_edit and not edit_user.is_admin) or (not is_edit and not (form and form.is_admin)) else '' }}>
+                <label class="form-check-label" for="roleUser">
+                  <i class="bi bi-person me-1"></i>Usuário comum
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="is_admin" value="1" id="roleAdmin"
+                       {{ 'checked' if (is_edit and edit_user.is_admin) or (not is_edit and form and form.is_admin) else '' }}>
+                <label class="form-check-label" for="roleAdmin">
+                  <i class="bi bi-shield-fill-check me-1 text-warning"></i>Administrador
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {% if not is_edit %}
+          <!-- Troca de senha obrigatória -->
+          <div class="mb-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="must_change_password"
+                     id="mustChange" value="1"
+                     {{ 'checked' if not form or form.must_change_password is not false else '' }}>
+              <label class="form-check-label small" for="mustChange">
+                <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+                Exigir troca de senha no primeiro login
+              </label>
+            </div>
+          </div>
+          {% else %}
+          <!-- Status ativo/inativo (edição) -->
+          <div class="mb-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="is_active"
+                     id="isActive" value="1"
+                     {{ 'checked' if edit_user.is_active else '' }}>
+              <label class="form-check-label small" for="isActive">
+                Conta ativa
+              </label>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary flex-grow-1 fw-semibold">
+              <i class="bi bi-check-lg me-1"></i>{{ 'Salvar Alterações' if is_edit else 'Criar Usuário' }}
+            </button>
+            <a href="/admin/users" class="btn btn-outline-secondary">Cancelar</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkStrength(val) {
+  let s = 0;
+  if (val.length >= 8)            s++;
+  if (/[A-Z]/.test(val))         s++;
+  if (/[a-z]/.test(val))         s++;
+  if (/\d/.test(val))            s++;
+  if (/[^A-Za-z0-9]/.test(val))  s++;
+  const bar = document.getElementById('strengthBar');
+  const lbl = document.getElementById('strengthLabel');
+  if (!bar) return;
+  bar.style.width = Math.round(s/5*100)+'%';
+  const lvl = ['','Muito fraca','Fraca','Razoável','Forte','Muito forte'];
+  const cls = ['','bg-danger','bg-warning','bg-info','bg-primary','bg-success'];
+  bar.className = 'progress-bar '+(cls[s]||'');
+  lbl.textContent = lvl[s]||'';
+}
+
+// Toggle pwd visibility
+document.querySelectorAll('.toggle-pwd').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const inp = document.querySelector(`[name="${btn.dataset.target}"]`);
+    const ico = btn.querySelector('i');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    ico.className = inp.type==='password' ? 'bi bi-eye text-muted' : 'bi bi-eye-slash text-muted';
+  });
+});
+
+// Gerar senha aleatória
+const genBtn = document.getElementById('genPwd');
+if (genBtn) {
+  genBtn.addEventListener('click', () => {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+    let pwd = '';
+    // Garantir pelo menos um de cada
+    pwd += 'ABCDEFGHJKMNPQRSTUVWXYZ'[Math.floor(Math.random()*23)];
+    pwd += 'abcdefghjkmnpqrstuvwxyz'[Math.floor(Math.random()*23)];
+    pwd += '23456789'[Math.floor(Math.random()*8)];
+    pwd += '!@#$'[Math.floor(Math.random()*4)];
+    while (pwd.length < 12) pwd += chars[Math.floor(Math.random()*chars.length)];
+    // Embaralhar
+    pwd = pwd.split('').sort(() => Math.random()-0.5).join('');
+    const inp = document.getElementById('password');
+    inp.value = pwd;
+    inp.type = 'text';
+    checkStrength(pwd);
+  });
+}
+</script>
+{% endblock %}

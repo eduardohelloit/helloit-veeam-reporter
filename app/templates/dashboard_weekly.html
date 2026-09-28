@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+{% block title %}Relatório Semanal — HelloIT{% endblock %}
+
+{% block content %}
+
+<!-- ── Page header ─────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-calendar-week me-2"></i>Relatório Semanal
+    <span id="headerClientName" class="text-muted fw-normal fs-5 ms-2 d-none">
+      — <span id="headerClientNameText"></span>
+    </span>
+  </h2>
+  <button class="btn btn-primary" id="btnExportPPTX">
+    <i class="bi bi-file-earmark-slides me-1"></i>Download PowerPoint
+  </button>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card mb-3 shadow-sm">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Cliente</label>
+        <select class="form-select form-select-sm" id="selClient" style="min-width:190px">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">De</label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Até</label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-auto">
+        <button class="btn btn-sm btn-primary" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-sm btn-outline-secondary ms-1" id="btnClear">
+          Limpar
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado inicial ───────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-funnel fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione os filtros e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<!-- ── Conteúdo (oculto até consulta) ─────────────────────────────────────── -->
+<div id="weeklyContent" class="d-none">
+
+<!-- ── VM Protection KPI row ───────────────────────────────────────────────── -->
+<div class="row g-2 mb-2">
+
+  <div class="col-4">
+    <div class="kpi-card card text-center h-100" style="border-top:3px solid #0d6efd;">
+      <div class="card-body py-2 px-2">
+        <div class="small text-muted mb-1 fw-semibold">
+          <i class="bi bi-hdd-network me-1 text-primary"></i>VMs Protegidas
+        </div>
+        <div class="kpi-number text-primary" id="kpiVMsProtected">—</div>
+        <div class="text-muted small mt-1">máquinas com backup no período</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-4">
+    <div class="kpi-card card text-center h-100" style="border-top:3px solid #e6a800;">
+      <div class="card-body py-2 px-2">
+        <div class="small text-muted mb-1 fw-semibold">
+          <i class="bi bi-journal-code me-1 text-warning"></i>Transaction Logs
+        </div>
+        <div class="kpi-number text-warning" id="kpiLogVMs">—</div>
+        <div class="text-muted small mt-1">VMs com backup de transaction log</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-4">
+    <div class="kpi-card card text-center h-100" style="border-top:3px solid #198754;">
+      <div class="card-body py-2 px-2">
+        <div class="small text-muted mb-1 fw-semibold">
+          <i class="bi bi-hdd-stack me-1 text-success"></i>Jobs de Backup
+        </div>
+        <div class="kpi-number text-success" id="kpiBackupJobs">—</div>
+        <div class="text-muted small mt-1">rotinas de backup distintas</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="text-muted small mb-3 fst-italic px-1">
+  <i class="bi bi-info-circle me-1"></i>
+  KPIs baseados em eventos EV150 (VM Task Finished) e EV190 (Backup Job Finished) no período selecionado.
+</div>
+
+<!-- ── Main content row ────────────────────────────────────────────────────── -->
+<div class="row g-3 align-items-start">
+
+  <!-- Donut chart card -->
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header py-2">
+        <h6 class="mb-0"><i class="bi bi-pie-chart me-1 text-primary"></i>Distribuição dos Backups</h6>
+      </div>
+      <div class="card-body d-flex flex-column align-items-center py-3">
+        <div style="width:180px; height:180px; position:relative;">
+          <canvas id="chartWeeklyDonut"></canvas>
+        </div>
+        <div class="mt-2 w-100" id="donutLegend"></div>
+        <div class="mt-3 d-flex gap-4 justify-content-center w-100">
+          <div class="text-center">
+            <div class="fw-bold text-danger fs-5 mb-0" id="kpiBkpFailed">—</div>
+            <div class="small text-muted">com Falha</div>
+          </div>
+          <div class="text-center">
+            <div class="fw-bold text-success fs-5 mb-0" id="kpiBkpSuccess">—</div>
+            <div class="small text-muted">com Sucesso</div>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer text-muted small fst-italic py-1 px-3">
+        <i class="bi bi-info-circle me-1"></i>
+        Status da última execução por rotina de backup regular no período (EV190).
+      </div>
+    </div>
+  </div>
+
+  <!-- Failed jobs table card -->
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">
+          <i class="bi bi-x-circle me-1 text-danger"></i>Jobs com Falha na Última Execução
+        </h6>
+        <span class="badge bg-danger rounded-pill" id="badgeFailedCount">—</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-dark sticky-top">
+              <tr>
+                <th>Rotina de Backup</th>
+                <th style="width:130px">Tipo</th>
+                <th style="width:145px">Última Execução</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyFailedJobs">
+              <tr><td colspan="3" class="text-center text-muted py-3">
+                <span class="spinner-border spinner-border-sm me-1"></span>Carregando...
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card-footer text-muted small fst-italic py-1 px-3">
+        <i class="bi bi-info-circle me-1"></i>
+        Rotinas cuja última execução registrada no período resultou em falha (result = Error).
+      </div>
+    </div>
+  </div>
+
+</div><!-- /row -->
+
+</div><!-- /weeklyContent -->
+
+{% endblock %}
+
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+'use strict';
+
+// ── Palette ──────────────────────────────────────────────────────────────────
+const C = {
+  red:    'rgba(220, 53,  69,  0.90)',
+  green:  'rgba(25,  135, 84,  0.90)',
+  blue:   'rgba(13,  110, 253, 0.90)',
+  yellow: 'rgba(230, 168,  0,  0.90)',
+};
+
+const TOOLTIP_OPTS = {
+  backgroundColor: 'rgba(0,0,0,0.80)',
+  padding: 10,
+  cornerRadius: 6,
+  titleFont: { size: 12 },
+  bodyFont:  { size: 11 },
+};
+
+// ── State ────────────────────────────────────────────────────────────────────
+let donutChart  = null;
+let _allFailed  = [];
+let _allSuccess = [];
+
+// ── Utils ────────────────────────────────────────────────────────────────────
+const fmt   = n => Number(n).toLocaleString('pt-BR');
+const pct   = (a, t) => t > 0 ? Math.round(a / t * 100) : 0;
+const escHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ── Datas padrão e validação ──────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; }
+function setDefaultDates() {
+  document.getElementById('dateStart').value = daysAgoStr(7);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+function checkPeriod() {
+  const s = document.getElementById('dateStart').value;
+  const e = document.getElementById('dateEnd').value;
+  if (!s || !e) return true;
+  const days = (new Date(e) - new Date(s)) / 86400000;
+  if (days > 90) return confirm(`Período de ${Math.round(days)} dias selecionado.\nPeríodos extensos podem demorar mais para processar.\nDeseja continuar?`);
+  return true;
+}
+function showWaiting() {
+  document.getElementById('waitingState').classList.remove('d-none');
+  document.getElementById('weeklyContent').classList.add('d-none');
+}
+
+// ── Data loading ─────────────────────────────────────────────────────────────
+async function loadData() {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final antes de consultar.'); return; }
+  if (!checkPeriod()) return;
+
+  const clientId = document.getElementById('selClient').value;
+
+  setLoading(true);
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('weeklyContent').classList.remove('d-none');
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/weekly-report-data?' + params.toString());
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.error || 'Erro ao consultar dados.'); showWaiting(); return;
+    }
+    const data = await resp.json();
+
+    _allFailed  = data.admin?.failed_jobs  || [];
+    _allSuccess = data.admin?.success_jobs || [];
+
+    const prot = data.protection?.kpis || {};
+    document.getElementById('kpiVMsProtected').textContent = fmt(prot.protected_vms ?? 0);
+    document.getElementById('kpiLogVMs').textContent       = fmt(prot.log_vms       ?? 0);
+    document.getElementById('kpiBackupJobs').textContent   = fmt(prot.backup_jobs   ?? 0);
+
+    renderDonut(_allFailed, _allSuccess);
+    renderFailedTable(_allFailed);
+    syncClientHeader();
+  } catch(err) {
+    console.error('loadData error:', err);
+    document.getElementById('tbodyFailedJobs').innerHTML =
+      `<tr><td colspan="3" class="text-center text-danger py-3">Erro ao carregar dados.</td></tr>`;
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Donut chart ───────────────────────────────────────────────────────────────
+function renderDonut(failedJobs, successJobs) {
+  const bkpFail = failedJobs.filter(j => j.job_type !== 'log_backup').length;
+  const bkpOk   = successJobs.filter(j => j.job_type !== 'log_backup').length;
+  const total   = bkpFail + bkpOk;
+
+  document.getElementById('kpiBkpFailed').textContent  = fmt(bkpFail);
+  document.getElementById('kpiBkpSuccess').textContent = fmt(bkpOk);
+
+  if (donutChart) { donutChart.destroy(); donutChart = null; }
+
+  const ctx = document.getElementById('chartWeeklyDonut').getContext('2d');
+  donutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Com Falha', 'Com Sucesso'],
+      datasets: [{
+        data: [bkpFail, bkpOk],
+        backgroundColor: [C.red, C.green],
+        borderColor: '#fff',
+        borderWidth: 3,
+        hoverOffset: 6,
+      }],
+    },
+    options: {
+      cutout: '60%',
+      plugins: {
+        tooltip: {
+          ...TOOLTIP_OPTS,
+          callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.raw)} rotinas` },
+        },
+        legend: { display: false },
+      },
+      responsive: true,
+      maintainAspectRatio: false,
+    },
+  });
+
+  // Legend
+  const items = [
+    ['Com Falha',   '#dc3545', bkpFail],
+    ['Com Sucesso', '#198754', bkpOk],
+  ];
+  document.getElementById('donutLegend').innerHTML = items.map(([lbl, clr, val]) =>
+    `<div class="d-flex align-items-center justify-content-center gap-1 small mb-1">
+       <span style="display:inline-block;width:10px;height:10px;background:${clr};
+                    border-radius:2px;flex-shrink:0;"></span>
+       <span class="text-muted">${lbl}:</span>
+       <span class="fw-semibold">${fmt(val)} (${pct(val, total)}%)</span>
+     </div>`
+  ).join('');
+}
+
+// ── Failed-jobs table ─────────────────────────────────────────────────────────
+function renderFailedTable(failedJobs) {
+  const tbody = document.getElementById('tbodyFailedJobs');
+  document.getElementById('badgeFailedCount').textContent = failedJobs.length;
+
+  const TYPE_LABEL = {
+    log_backup: 'Transaction Log',
+    backup:     'Backup Regular',
+  };
+
+  if (!failedJobs.length) {
+    tbody.innerHTML =
+      `<tr><td colspan="3" class="text-center text-success py-3">
+         <i class="bi bi-check-circle me-1"></i>Nenhum job com falha no período
+       </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = failedJobs.map(j => {
+    const typeBadge = j.job_type === 'log_backup'
+      ? '<span class="badge bg-warning text-dark">Transaction Log</span>'
+      : '<span class="badge bg-primary">Backup Regular</span>';
+    return `<tr>
+      <td class="fw-medium">${escHtml(j.job_name)}</td>
+      <td>${typeBadge}</td>
+      <td class="text-muted small">${escHtml(j.last_execution)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Client name in heading ────────────────────────────────────────────────────
+function syncClientHeader() {
+  const sel  = document.getElementById('selClient');
+  const name = sel.options[sel.selectedIndex]?.text || '';
+  const wrap = document.getElementById('headerClientName');
+  const txt  = document.getElementById('headerClientNameText');
+  if (sel.value && name !== 'Todos os clientes') {
+    txt.textContent = name;
+    wrap.classList.remove('d-none');
+  } else {
+    wrap.classList.add('d-none');
+  }
+}
+
+// ── Loading state ─────────────────────────────────────────────────────────────
+function setLoading(on) {
+  document.getElementById('btnExportPPTX').disabled = on;
+}
+
+// ── Export PowerPoint ─────────────────────────────────────────────────────────
+document.getElementById('btnExportPPTX').addEventListener('click', async () => {
+  const btn = document.getElementById('btnExportPPTX');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gerando…';
+
+  try {
+    const clientId  = document.getElementById('selClient').value;
+    const dateStart = document.getElementById('dateStart').value;
+    const dateEnd   = document.getElementById('dateEnd').value;
+
+    const sel        = document.getElementById('selClient');
+    const clientName = sel.value
+      ? (sel.options[sel.selectedIndex]?.text || 'cliente')
+      : 'todos';
+
+    const payload = {
+      client_id:  clientId ? parseInt(clientId, 10) : null,
+      date_start: dateStart || null,
+      date_end:   dateEnd   || null,
+    };
+
+    const resp = await fetch('/api/export/weekly-pptx', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try { detail = (await resp.json()).detail || detail; } catch {}
+      alert('Erro ao gerar PowerPoint: ' + detail);
+      return;
+    }
+
+    const blob  = await resp.blob();
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.href     = url;
+    a.download = `Relatorio_Semanal_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${today}.pptx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+  } catch (err) {
+    alert('Erro inesperado: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-file-earmark-slides me-1"></i>Download PowerPoint';
+  }
+});
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadData);
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value = '';
+  setDefaultDates();
+  syncClientHeader();
+  showWaiting();
+});
+document.getElementById('selClient').addEventListener('change', syncClientHeader);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

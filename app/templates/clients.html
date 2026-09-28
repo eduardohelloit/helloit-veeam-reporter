@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Clientes — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0"><i class="bi bi-building me-2"></i>Clientes</h2>
+    <p class="page-subtitle mb-0">Cadastre os clientes antes de importar arquivos de log.</p>
+  </div>
+  <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalNew">
+    <i class="bi bi-plus-circle me-1"></i>Novo Cliente
+  </button>
+</div>
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible fade show">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<!-- Client list -->
+{% if clients %}
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3">Cliente</th>
+          <th>Descrição</th>
+          <th class="text-center" style="width:110px">Uploads</th>
+          <th class="text-center" style="width:110px">Eventos</th>
+          <th class="text-center" style="width:80px">Status</th>
+          <th class="text-end pe-3" style="width:130px">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in clients %}
+        <tr class="{% if not c.is_active %}table-secondary text-muted{% endif %}">
+          <td class="ps-3 fw-semibold">
+            <i class="bi bi-building me-2 text-primary"></i>{{ c.name }}
+          </td>
+          <td class="small text-muted">{{ c.description or '—' }}</td>
+          <td class="text-center small">{{ stats[c.id].uploads }}</td>
+          <td class="text-center small">{{ stats[c.id].events | format_number }}</td>
+          <td class="text-center">
+            {% if c.is_active %}
+              <span class="badge bg-success">Ativo</span>
+            {% else %}
+              <span class="badge bg-secondary">Inativo</span>
+            {% endif %}
+          </td>
+          <td class="text-end pe-3">
+            <button class="btn btn-outline-secondary btn-sm py-0"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modalEdit"
+                    data-id="{{ c.id }}"
+                    data-name="{{ c.name }}"
+                    data-desc="{{ c.description or '' }}"
+                    title="Editar">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <form action="/clients/{{ c.id }}/toggle" method="post" class="d-inline">
+              <button type="submit" class="btn btn-outline-secondary btn-sm py-0"
+                      title="{{ 'Desativar' if c.is_active else 'Ativar' }}">
+                <i class="bi bi-{{ 'pause-circle' if c.is_active else 'play-circle' }}"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-building fs-1 text-muted"></i>
+  <p class="text-muted mt-3">Nenhum cliente cadastrado ainda.<br>
+    Clique em <strong>Novo Cliente</strong> para começar.
+  </p>
+</div>
+{% endif %}
+
+<!-- Info card -->
+<div class="alert alert-info border mt-4 small">
+  <i class="bi bi-info-circle me-2"></i>
+  <strong>Como funciona:</strong> Cada upload de arquivo de log é vinculado a um cliente.
+  Uploads do mesmo cliente são acumulados no banco — eventos já existentes são ignorados automaticamente,
+  evitando duplicatas. Os dashboards permitem filtrar por cliente.
+</div>
+
+<!-- ── Modal: Novo cliente ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="modalNew" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="/clients/new" method="post">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Novo Cliente</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Nome <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" placeholder="Ex.: Empresa XYZ" required autofocus>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Descrição <span class="text-muted fw-normal">(opcional)</span></label>
+            <input type="text" name="description" class="form-control" placeholder="Ex.: Filial São Paulo">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Criar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Editar cliente ───────────────────────────────────────────────── -->
+<div class="modal fade" id="modalEdit" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="editForm" action="" method="post">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Editar Cliente</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Nome <span class="text-danger">*</span></label>
+            <input type="text" name="name" id="editName" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Descrição <span class="text-muted fw-normal">(opcional)</span></label>
+            <input type="text" name="description" id="editDesc" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('modalEdit').addEventListener('show.bs.modal', function(e) {
+  const btn = e.relatedTarget;
+  const id   = btn.dataset.id;
+  const name = btn.dataset.name;
+  const desc = btn.dataset.desc;
+  document.getElementById('editName').value = name;
+  document.getElementById('editDesc').value = desc;
+  document.getElementById('editForm').action = `/clients/${id}/edit`;
+});
+</script>
+{% endblock %}

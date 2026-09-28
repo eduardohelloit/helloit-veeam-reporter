@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Importar Eventos — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <h2 class="page-title mb-1"><i class="bi bi-cloud-upload me-2"></i>Importar Event Viewer</h2>
+    <p class="page-subtitle mb-4">
+      Exporte os eventos do <strong>Windows Event Viewer → Applications and Services Logs → Veeam Backup</strong>
+      e faça o upload abaixo. Os eventos são adicionados à base histórica do cliente —
+      duplicatas são ignoradas automaticamente.
+      Formatos aceitos: <code>.evtx</code>, <code>.xml</code>, <code>.csv</code>
+      (preferência: <code>.evtx</code>).
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-file-earmark-arrow-up me-2"></i>Carregar arquivo de eventos
+      </div>
+      <div class="card-body">
+        <form action="/import" method="post" enctype="multipart/form-data" id="importForm">
+
+          <div class="mb-4">
+            <label for="fileInput" class="form-label fw-semibold">
+              Arquivo de eventos <span class="text-danger">*</span>
+            </label>
+            <input class="form-control" type="file" id="fileInput" name="file"
+                   accept=".evtx,.xml,.csv" required>
+            <div class="form-text">
+              Exporte os últimos <strong>14 dias ou mais</strong> para garantir histórico suficiente.
+              O período é detectado automaticamente. Uploads do mesmo cliente acumulam — duplicatas são ignoradas.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="client_id" class="form-label fw-semibold">
+              Cliente <span class="text-danger">*</span>
+            </label>
+            {% if clients %}
+            <select class="form-select" id="client_id" name="client_id" required>
+              <option value="">— Selecione o cliente —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.description %} — {{ c.description }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">
+              Cliente não cadastrado?
+              <a href="/clients" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Cadastrar agora</a>
+              e volte a esta tela.
+            </div>
+            {% else %}
+            <div class="alert alert-warning py-2 mb-0">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              Nenhum cliente cadastrado.
+              <a href="/clients" class="alert-link">Cadastre um cliente</a> antes de importar.
+            </div>
+            <input type="hidden" name="client_id" value="0">
+            {% endif %}
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn"
+                    {% if not clients %}disabled{% endif %}>
+              <i class="bi bi-play-circle me-2"></i>Iniciar Importação
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Como exportar -->
+    <div class="card border-info mb-4">
+      <div class="card-header bg-info text-white fw-semibold">
+        <i class="bi bi-info-circle me-2"></i>Como exportar do Event Viewer
+      </div>
+      <div class="card-body small">
+        <ol class="mb-0">
+          <li>Acesse o servidor VBR via RDP.</li>
+          <li>Abra <strong>Event Viewer → Applications and Services Logs → Veeam Backup</strong>.</li>
+          <li>Clique em <em>Filter Current Log...</em> e filtre os últimos <strong>14 dias ou mais</strong>.</li>
+          <li>Clique em <em>Save Filtered Log File As...</em> e salve como <strong>.evtx</strong>.</li>
+          <li>Faça o upload do arquivo gerado nesta tela.</li>
+          <li>O período será detectado automaticamente. Para gerar o relatório, acesse <a href="/reports/new">Relatórios → Novo Relatório</a>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Importações recentes -->
+    {% if sessions %}
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-2"></i>Importações recentes</span>
+        <a href="/history" class="btn btn-outline-secondary btn-sm">Ver todas</a>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for s in sessions %}
+        <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+          <div>
+            <i class="bi bi-building me-2 text-muted"></i>
+            <strong>{{ s.client.name if s.client else '—' }}</strong>
+            <span class="text-muted ms-2 small">{{ s.original_filename }}</span>
+          </div>
+          <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            {% if s.status == 'done' %}
+              <span class="badge bg-success">
+                +{{ (s.new_events_inserted or 0) | format_number }} novos
+              </span>
+              {% if s.duplicate_events_skipped %}
+              <span class="badge bg-secondary">{{ s.duplicate_events_skipped | format_number }} dup.</span>
+              {% endif %}
+              <a href="/import/{{ s.id }}/summary" class="btn btn-outline-primary btn-sm py-0">
+                <i class="bi bi-list-check me-1"></i>Resumo
+              </a>
+            {% elif s.status == 'error' %}
+              <span class="badge bg-danger">Erro</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Processando...</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('importForm').addEventListener('submit', function () {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando arquivo...';
+  });
+</script>
+{% endblock %}

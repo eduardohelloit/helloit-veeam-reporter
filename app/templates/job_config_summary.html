@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Resumo da Importação de Configuração — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="page-title mb-0">
+        {% if imp.status == 'completed' %}
+        <i class="bi bi-check-circle-fill text-success me-2"></i>Importação concluída
+        {% else %}
+        <i class="bi bi-x-circle-fill text-danger me-2"></i>Erro na importação
+        {% endif %}
+      </h2>
+      <div class="d-flex gap-2">
+        <a href="/job-config/import" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-upload me-1"></i>Nova importação
+        </a>
+        <a href="/job-config/history" class="btn btn-outline-primary btn-sm">
+          <i class="bi bi-clock-history me-1"></i>Histórico
+        </a>
+        <a href="/analytics/job-config" class="btn btn-outline-success btn-sm">
+          <i class="bi bi-search-heart me-1"></i>Analisar
+        </a>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle me-2 text-primary"></i>Detalhes da carga
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="small text-muted">Cliente</div>
+            <div class="fw-semibold">{{ client.name if client else '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Arquivo</div>
+            <div class="fw-semibold">{{ imp.original_filename }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Importado em</div>
+            <div class="fw-semibold">
+              {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+              {% if imp.uploaded_by %}
+              <span class="text-muted small">por {{ imp.uploaded_by }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Servidor VBR / Versão do script</div>
+            <div class="fw-semibold">
+              {{ imp.vbr_server or '—' }}
+              {% if imp.script_version %}
+              <span class="badge bg-secondary ms-1">v{{ imp.script_version }}</span>
+              {% endif %}
+            </div>
+          </div>
+          {% if imp.min_collected_at and imp.max_collected_at %}
+          <div class="col-12">
+            <div class="small text-muted">Período de coleta</div>
+            <div class="fw-semibold">
+              <i class="bi bi-calendar-range me-1 text-primary"></i>
+              {{ imp.min_collected_at.strftime('%d/%m/%Y %H:%M') }}
+              → {{ imp.max_collected_at.strftime('%d/%m/%Y %H:%M') }}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-primary">{{ (imp.total_lines or 0)|format_number }}</div>
+            <div class="small text-muted">Linhas lidas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-success">{{ (imp.inserted_jobs or 0)|format_number }}</div>
+            <div class="small text-muted">Rotinas novas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-secondary bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-secondary">{{ (imp.duplicate_jobs or 0)|format_number }}</div>
+            <div class="small text-muted">Duplicatas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-info bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-info">{{ (imp.inserted_objects or 0)|format_number }}</div>
+            <div class="small text-muted">Objetos/VMs</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if imp.failed_lines %}
+    <div class="alert alert-warning small mb-4">
+      <i class="bi bi-exclamation-triangle me-2"></i>
+      {{ imp.failed_lines }} linha(s) com erro de parsing ignoradas.
+    </div>
+    {% endif %}
+
+    {% if imp.status_message %}
+    <div class="alert {% if imp.status == 'completed' %}alert-info{% else %}alert-danger{% endif %} small mb-0">
+      <i class="bi bi-{% if imp.status == 'completed' %}lightbulb{% else %}exclamation-triangle{% endif %} me-2"></i>
+      {{ imp.status_message }}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

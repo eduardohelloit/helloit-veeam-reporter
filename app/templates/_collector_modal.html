@@ -1,0 +1,57 @@
+<!-- Modal reutilizável: ver / copiar o script de coleta PowerShell -->
+<div class="modal fade" id="collectorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title mb-0">
+          <i class="bi bi-file-earmark-code me-2"></i><span id="collectorTitle">Script de coleta</span>
+        </h5>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-success btn-sm" id="btnCopyCollector">
+            <i class="bi bi-clipboard me-1"></i>Copiar
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2">
+          <i class="bi bi-info-circle me-1"></i>
+          Copie o conteúdo, salve como <code>.ps1</code> no servidor VBR e execute no PowerShell.
+          Somente leitura — não altera nada no Veeam.
+        </p>
+        <pre id="collectorCode" class="mb-0" style="max-height:62vh;overflow:auto;background:#0d1117;color:#e6edf3;padding:1rem;border-radius:6px;font-size:.8rem;line-height:1.45;white-space:pre;">Carregando…</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  async function showCollector(key, title) {
+    document.getElementById('collectorTitle').textContent = title || 'Script de coleta';
+    const pre = document.getElementById('collectorCode');
+    pre.textContent = 'Carregando…';
+    new bootstrap.Modal(document.getElementById('collectorModal')).show();
+    try {
+      const r = await fetch('/api/collector-script/' + encodeURIComponent(key));
+      pre.textContent = r.ok ? await r.text() : 'Erro ao carregar o script (' + r.status + ').';
+    } catch (e) { pre.textContent = 'Erro ao carregar o script.'; }
+  }
+  window.showCollector = showCollector;
+
+  const btn = document.getElementById('btnCopyCollector');
+  if (btn) btn.addEventListener('click', async function () {
+    const txt = document.getElementById('collectorCode').textContent;
+    try {
+      await navigator.clipboard.writeText(txt);
+      btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Copiado!';
+      setTimeout(function () { btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copiar'; }, 2000);
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById('collectorCode'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      btn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Selecione e Ctrl+C';
+    }
+  });
+})();
+</script>

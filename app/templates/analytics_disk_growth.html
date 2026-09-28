@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}Crescimento de Fulls — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-graph-up-arrow" style="color:var(--brand-primary)"></i>
+      Crescimento de Fulls
+    </h4>
+    <p class="text-muted small mb-0">
+      Evolução do tamanho dos backups full — munição para justificar repositório.
+      Tamanho lógico por VM; real estimado (calibrado) no agregado do ambiente.
+    </p>
+  </div>
+  {% if data.has_data and not data.empty and selected_client_id %}
+  <a class="btn btn-outline-success btn-sm"
+     href="/analytics/disk-growth/export-excel?client_id={{ selected_client_id }}{% if f.job %}&job={{ f.job|urlencode }}{% endif %}{% if f.date_from %}&date_from={{ f.date_from }}{% endif %}{% if f.date_to %}&date_to={{ f.date_to }}{% endif %}">
+    <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+  </a>
+  {% endif %}
+</div>
+
+<!-- ═══ FILTROS ══════════════════════════════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <form method="get" action="/analytics/disk-growth" class="d-flex align-items-end flex-wrap gap-2">
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+        <select name="client_id" class="form-select form-select-sm" style="min-width:220px"
+                onchange="this.form.submit()">
+          <option value="">Selecione o cliente...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if data.has_data and not data.empty %}
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Rotina (job)</label>
+        <select name="job" class="form-select form-select-sm" style="min-width:180px">
+          <option value="">Todas</option>
+          {% for j in data.jobs %}
+          <option value="{{ j }}" {% if f.job == j %}selected{% endif %}>{{ j }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">VM (analisar uma)</label>
+        <input list="vmlist" name="vm" value="{{ f.vm or '' }}" placeholder="ex.: SRV-EXEMPLO"
+               class="form-control form-control-sm" style="min-width:190px" autocomplete="off">
+        <datalist id="vmlist">
+          {% for v in data.vms %}<option value="{{ v }}">{% endfor %}
+        </datalist>
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">De</label>
+        <input type="date" name="date_from" value="{{ f.date_from or '' }}" class="form-control form-control-sm">
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Até</label>
+        <input type="date" name="date_to" value="{{ f.date_to or '' }}" class="form-control form-control-sm">
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Top</label>
+        <input type="number" name="top_n" value="{{ f.top_n or 15 }}" min="3" max="50"
+               class="form-control form-control-sm" style="width:80px">
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Filtrar</button>
+        <a href="/analytics/disk-growth?client_id={{ selected_client_id or '' }}" class="btn btn-outline-secondary btn-sm">Limpar</a>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{% if not selected_client_id %}
+  <div class="alert alert-light border">Selecione um cliente para ver o crescimento dos backups full.</div>
+{% elif not data.has_data %}
+  <div class="alert alert-warning">Nenhuma carga de "Backups em Disco" concluída foi encontrada para este cliente.</div>
+{% elif data.empty %}
+  <div class="alert alert-warning">Sem pontos full no período/filtro selecionado.</div>
+
+{% elif data.mode == 'vm' %}
+  <!-- ═══ DETALHE DE UMA VM ══════════════════════════════════════════════════ -->
+  {% set d = data.vm_detail %}
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <a href="/analytics/disk-growth?client_id={{ selected_client_id }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i></a>
+    <h5 class="fw-bold mb-0">{{ d.name }}</h5>
+    <span class="text-muted small">{{ d.n }} full(s) · {{ data.range.from }} → {{ data.range.to }}</span>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">1º full → último</div>
+      <div class="fw-bold fs-5">{{ d.first | fmt_bytes }} → {{ d.last | fmt_bytes }}</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Crescimento</div>
+      <div class="fw-bold fs-5 {{ 'text-danger' if d.delta > 0 else 'text-success' }}">
+        {{ '+' if d.delta > 0 else '' }}{{ d.delta | fmt_bytes }}
+        <span class="fs-6 text-muted">({{ '%+.0f'|format(d.pct) }}%)</span>
+      </div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Ritmo</div>
+      <div class="fw-bold fs-5">{{ d.per_month | fmt_bytes }}<span class="fs-6 text-muted">/mês</span></div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Projeção 12 meses</div>
+      <div class="fw-bold fs-5">{{ d.proj12 | fmt_bytes }}
+        <span class="fs-6 text-danger">(+{{ d.proj12_delta | fmt_bytes }})</span></div>
+    </div></div></div>
+  </div>
+
+  <div class="card shadow-sm mb-4"><div class="card-body">
+    <h6 class="fw-bold mb-3">Tamanho dos fulls no tempo (GB)</h6>
+    <div style="position:relative;height:340px"><canvas id="chartVM"></canvas></div>
+  </div></div>
+
+  <div class="card shadow-sm"><div class="card-body">
+    <h6 class="fw-bold mb-3">Pontos full</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light"><tr><th>Data</th><th class="text-end">Tamanho</th><th>GFS</th></tr></thead>
+        <tbody>
+          {% for p in d.points %}
+          <tr><td>{{ p.date }}</td><td class="text-end fw-semibold">{{ p.bytes | fmt_bytes }}</td>
+            <td>{% if p.gfs %}<span class="badge bg-info text-dark">GFS</span>{% else %}<span class="text-muted">—</span>{% endif %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div></div>
+
+{% else %}
+  <!-- ═══ VISÃO MACRO (AMBIENTE) ═════════════════════════════════════════════ -->
+  {% set k = data.kpi %}{% set co = data.cohort %}
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-lg-4"><div class="card shadow-sm h-100 border-primary"><div class="card-body py-3">
+      <div class="text-muted small">Tamanho atual do ambiente (real estimado)</div>
+      <div class="fw-bold" style="font-size:1.9rem">{{ k.current_real | fmt_bytes }}</div>
+      <div class="small text-muted">{{ k.n_active }} VMs ativas em fulls</div>
+    </div></div></div>
+    <div class="col-6 col-lg-4"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Ritmo de crescimento</div>
+      <div class="fw-bold text-danger" style="font-size:1.9rem">+{{ k.rate_real_month | fmt_bytes }}<span class="fs-6 text-muted">/mês</span></div>
+      <div class="small text-muted">medido por VM (janela média {{ k.avg_span }} meses)</div>
+    </div></div></div>
+    <div class="col-6 col-lg-4"><div class="card shadow-sm h-100 bg-light"><div class="card-body py-3">
+      <div class="text-muted small">Projeção em 12 meses (ritmo atual)</div>
+      <div class="fw-bold" style="font-size:1.9rem">{{ k.proj12_real | fmt_bytes }}
+        <span class="fs-6 text-danger">(+{{ k.proj12_delta_real | fmt_bytes }})</span></div>
+      <div class="small text-muted">no ritmo atual, é o que o repositório precisa absorver</div>
+    </div></div></div>
+  </div>
+
+  <!-- corroboração: coorte de histórico longo -->
+  <div class="alert alert-primary d-flex flex-wrap gap-3 align-items-center py-3 mb-4">
+    <i class="bi bi-shield-check fs-4"></i>
+    <div>
+      <div class="fw-semibold">Prova contra o "adicionamos poucas máquinas"</div>
+      <div class="small">
+        As <strong>{{ co.n }} VMs</strong> que já existiam em <strong>{{ co.df }}</strong>
+        (têm full comprovado desde então) cresceram de
+        <strong>{{ co.start_real | fmt_bytes }}</strong> para
+        <strong>{{ co.end_real | fmt_bytes }}</strong>
+        <span class="text-danger fw-semibold">({{ '%+.0f'|format(co.growth_pct) }}%, +{{ co.growth_real | fmt_bytes }})</span>
+        — as <em>mesmas</em> máquinas, sem nenhuma nova. O ambiente incha pelo dado, não só por VMs novas.
+      </div>
+    </div>
+  </div>
+
+  <!-- gráfico do ambiente: coorte fixa semanal -->
+  <div class="card shadow-sm mb-4"><div class="card-body">
+    <h6 class="fw-bold mb-1">Crescimento semanal — as mesmas {{ data.chart.n_vms }} VMs (real estimado, GB)</h6>
+    <p class="text-muted small mb-3">
+      Plota o <strong>mesmo conjunto de {{ data.chart.n_vms }} VMs</strong> (as que já tinham
+      full no início da janela) semana a semana — cobertura constante, sem rampa artificial.
+      É crescimento puro: as mesmas máquinas, ocupando mais espaço.
+    </p>
+    <div style="position:relative;height:320px"><canvas id="chartEnv"></canvas></div>
+    <div class="small text-muted mt-2">
+      O "real" aplica o fator de calibração de block cloning sobre o tamanho lógico.
+    </div>
+  </div></div>
+
+  <!-- top movers -->
+  <div class="card shadow-sm"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-bold mb-0">VMs que mais cresceram — top {{ f.top_n or 15 }}</h6>
+      <span class="text-muted small">de {{ data.movers|length }} VMs · use a busca de VM p/ uma específica · "hist" = meses medidos</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light"><tr>
+          <th>VM</th><th class="text-end">Hist</th><th class="text-end">1º full</th><th class="text-end">Último</th>
+          <th class="text-end">Crescimento</th><th class="text-end">%</th><th class="text-end">GB/mês</th><th class="text-end">Pts</th>
+        </tr></thead>
+        <tbody>
+          {% for m in data.movers[:(f.top_n or 15)] %}
+          <tr style="cursor:pointer"
+              onclick="location.href='/analytics/disk-growth?client_id={{ selected_client_id }}&vm={{ m.vm|urlencode }}'">
+            <td class="fw-semibold">{{ m.vm }}</td>
+            <td class="text-end text-muted small">{{ m.hist }}m</td>
+            <td class="text-end small">{{ m.first | fmt_bytes }}</td>
+            <td class="text-end small">{{ m.last | fmt_bytes }}</td>
+            <td class="text-end fw-semibold {{ 'text-danger' if m.delta > 0 else 'text-success' }}">
+              {{ '+' if m.delta > 0 else '' }}{{ m.delta | fmt_bytes }}</td>
+            <td class="text-end small">{{ '%+.0f'|format(m.pct) }}%</td>
+            <td class="text-end small">{{ m.per_month | fmt_bytes }}</td>
+            <td class="text-end text-muted small">{{ m.n }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div></div>
+{% endif %}
+
+{% if data.has_data and not data.empty %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const CH = {{ data.chart | tojson }};
+  const gridColor = getComputedStyle(document.body).color === 'rgb(255, 255, 255)' ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.07)';
+  const common = {responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:true,position:'bottom'}},
+    scales:{y:{beginAtZero:false,title:{display:true,text:'GB'},grid:{color:gridColor}},
+            x:{grid:{display:false}}}};
+
+  {% if data.mode == 'vm' %}
+  const cv = document.getElementById('chartVM');
+  if (cv) new Chart(cv, {type:'line', data:{labels:CH.labels, datasets:[{
+      label:'Tamanho do full (GB)', data:CH.gb, borderColor:'#0d6efd',
+      backgroundColor:'rgba(13,110,253,.12)', fill:true, tension:.25,
+      pointRadius: CH.gfs.map(g=>g?5:3),
+      pointBackgroundColor: CH.gfs.map(g=>g?'#0dcaf0':'#0d6efd')
+    }]}, options:common});
+  {% else %}
+  const ce = document.getElementById('chartEnv');
+  if (ce) new Chart(ce, {type:'line', data:{labels:CH.labels, datasets:[
+      {label:'Mesmas VMs — real estimado (GB)', data:CH.total_gb, borderColor:'#dc3545',
+       backgroundColor:'rgba(220,53,69,.12)', fill:true, tension:.25, pointRadius:3}
+    ]}, options:common});
+  {% endif %}
+</script>
+{% endif %}
+{% endblock %}

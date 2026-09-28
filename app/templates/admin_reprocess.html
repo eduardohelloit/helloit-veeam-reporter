@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Reprocessar Eventos — Admin{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <h2 class="page-title mb-1">
+      <i class="bi bi-arrow-repeat me-2"></i>Reprocessar Eventos
+    </h2>
+    <p class="page-subtitle mb-4">
+      Recalcula campos derivados (job_name, job_result, event_category, etc.) a partir dos dados
+      brutos armazenados — sem necessidade de re-upload. Útil após atualizações no parser.
+    </p>
+
+    <div class="alert alert-warning mb-4">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>
+      <strong>Atenção:</strong> Esta operação recalcula campos de todos os eventos selecionados.
+      Os dados brutos (<code>raw_event_xml</code> / <code>raw_event_json</code>) são preservados
+      e os campos derivados são sobrescritos com os novos valores calculados.
+    </div>
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-database me-2 text-primary"></i>Base histórica
+      </div>
+      <div class="card-body">
+        <div class="row g-3 text-center">
+          <div class="col-md-4">
+            <div class="fs-2 fw-bold text-primary">{{ total_events | format_number }}</div>
+            <div class="small text-muted">Total de eventos</div>
+          </div>
+          <div class="col-md-4">
+            <div class="fs-2 fw-bold text-muted">{{ clients | length }}</div>
+            <div class="small text-muted">Clientes ativos</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-sliders me-2"></i>Opções de reprocessamento
+      </div>
+      <div class="card-body">
+
+        <!-- Scope -->
+        <div class="mb-4">
+          <label class="form-label fw-semibold">Escopo</label>
+          <div class="d-flex flex-column gap-2">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="scope" id="scopeAll"
+                     value="all" checked>
+              <label class="form-check-label" for="scopeAll">
+                <strong>Todos os eventos</strong>
+                <span class="text-muted small ms-2">({{ total_events | format_number }} eventos)</span>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="scope" id="scopeClient"
+                     value="client">
+              <label class="form-check-label" for="scopeClient">
+                <strong>Apenas um cliente</strong>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Client selector (shown when scopeClient is selected) -->
+        <div id="clientSelector" class="mb-4 d-none">
+          <label for="client_id" class="form-label fw-semibold">Cliente</label>
+          <select class="form-select" id="client_id">
+            <option value="">— Selecione —</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Result area -->
+        <div id="resultArea" class="d-none mb-3"></div>
+
+        <button type="button" class="btn btn-danger" id="reprocessBtn">
+          <i class="bi bi-arrow-repeat me-2"></i>Iniciar Reprocessamento
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Toggle client selector
+  document.querySelectorAll('input[name="scope"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const show = document.getElementById('scopeClient').checked;
+      document.getElementById('clientSelector').classList.toggle('d-none', !show);
+    });
+  });
+
+  document.getElementById('reprocessBtn').addEventListener('click', async () => {
+    const scope = document.querySelector('input[name="scope"]:checked').value;
+    const clientId = scope === 'client'
+      ? parseInt(document.getElementById('client_id').value) || null
+      : null;
+
+    if (scope === 'client' && !clientId) {
+      alert('Selecione um cliente.');
+      return;
+    }
+
+    const confirmed = confirm(
+      scope === 'all'
+        ? 'Reprocessar TODOS os eventos? Esta operação pode demorar.'
+        : 'Reprocessar eventos do cliente selecionado?'
+    );
+    if (!confirmed) return;
+
+    const btn = document.getElementById('reprocessBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processando...';
+
+    const result = document.getElementById('resultArea');
+    result.className = 'alert alert-info mb-3';
+    result.classList.remove('d-none');
+    result.textContent = 'Reprocessando eventos...';
+
+    try {
+      const resp = await fetch('/api/admin/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      const data = await resp.json();
+
+      if (resp.ok) {
+        result.className = 'alert alert-success mb-3';
+        result.innerHTML =
+          `<i class="bi bi-check-circle me-2"></i>` +
+          `<strong>${data.reprocessed.toLocaleString('pt-BR')}</strong> eventos verificados, ` +
+          `<strong>${data.updated.toLocaleString('pt-BR')}</strong> atualizados.`;
+      } else {
+        result.className = 'alert alert-danger mb-3';
+        result.textContent = `Erro: ${JSON.stringify(data)}`;
+      }
+    } catch (e) {
+      result.className = 'alert alert-danger mb-3';
+      result.textContent = `Erro de comunicação: ${e.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Iniciar Reprocessamento';
+    }
+  });
+</script>
+{% endblock %}

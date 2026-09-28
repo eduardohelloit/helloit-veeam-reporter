@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Block Cloning — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-diagram-3" style="color:var(--brand-primary)"></i>
+      Block Cloning — VMs com fulls espalhados
+    </h4>
+    <p class="text-muted small mb-0">
+      VMs cujos arquivos (fulls) estão em 2+ extents do SOBR — o block cloning
+      (fast clone) só vale dentro do mesmo extent, então o full grava cheio.
+    </p>
+  </div>
+  {% if selected_client_id and d.has_extent and d.spread %}
+  <a class="btn btn-outline-success btn-sm"
+     href="/analytics/block-cloning/export-excel?client_id={{ selected_client_id }}">
+    <i class="bi bi-file-earmark-excel me-1"></i>Excel
+  </a>
+  {% endif %}
+</div>
+
+<div class="card shadow-sm mb-3"><div class="card-body py-3">
+  <form method="get" action="/analytics/block-cloning" class="d-flex align-items-end gap-2 flex-wrap">
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+      <select name="client_id" class="form-select form-select-sm" style="min-width:240px" onchange="this.form.submit()">
+        <option value="">Selecione o cliente...</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Analisar</button>
+    {% if d.import_at %}
+    <span class="text-muted small ms-2">Coleta de {{ d.import_at.strftime('%d/%m/%Y %H:%M') }}</span>
+    {% endif %}
+  </form>
+</div></div>
+
+{% if not selected_client_id %}
+  <div class="alert alert-light border">Selecione um cliente para analisar.</div>
+
+{% elif not d.has_import %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-1"></i>
+    Nenhuma coleta de disco importada para este cliente ainda.
+  </div>
+
+{% elif not d.has_extent %}
+  <div class="alert alert-warning">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Esta análise precisa do extent por ponto.</strong>
+    A coleta atual traz apenas o nome do SOBR — não dá para saber em qual extent
+    (repositório físico) cada arquivo está.
+  </div>
+  <div class="card shadow-sm"><div class="card-body">
+    <h6 class="fw-bold">Como habilitar</h6>
+    <p class="small mb-2">No servidor Veeam, rode o coletor de disco com o modo de extent ligado:</p>
+    <pre class="bg-dark text-light p-3 rounded small mb-2"><code>.\collect_disk_backups.ps1 -WithExtent</code></pre>
+    <p class="small text-muted mb-0">
+      Depois importe o NDJSON na tela <strong>Importar PowerShell</strong>.
+      O modo <code>-WithExtent</code> consulta o repositório de cada ponto
+      (mais lento, mas seguro — não usa a rotina que travava a coleta).
+      Reabra esta tela após importar.
+    </p>
+  </div></div>
+
+{% elif not d.spread %}
+  <div class="alert alert-success">
+    <i class="bi bi-check-circle me-1"></i>
+    Nenhuma cadeia de VM espalhada entre extents. Block cloning preservado
+    em todas as {{ d.n_chains_total }} cadeias com arquivos locais.
+  </div>
+
+{% else %}
+  <div class="row g-3 mb-3">
+    <div class="col-sm-3">
+      <div class="card shadow-sm h-100"><div class="card-body text-center py-3">
+        <div class="fw-bold" style="font-size:1.9rem;color:var(--bs-danger)">{{ d.n_spread }}</div>
+        <div class="small text-muted">cadeias de VM espalhadas<br>de {{ d.n_chains_total }} locais</div>
+      </div></div>
+    </div>
+    <div class="col-sm-3">
+      <div class="card shadow-sm h-100"><div class="card-body text-center py-3">
+        <div class="fw-bold" style="font-size:1.9rem;color:var(--bs-warning)">{{ d.n_jobs_affected }}</div>
+        <div class="small text-muted">rotinas afetadas</div>
+      </div></div>
+    </div>
+    <div class="col-sm-3">
+      <div class="card shadow-sm h-100"><div class="card-body text-center py-3">
+        <div class="fw-bold" style="font-size:1.9rem;color:var(--brand-primary)">{{ d.total_afetado|fmt_bytes }}</div>
+        <div class="small text-muted">tamanho em disco<br>das cadeias espalhadas</div>
+      </div></div>
+    </div>
+    <div class="col-sm-3">
+      <div class="card shadow-sm h-100"><div class="card-body text-center py-3">
+        <div class="fw-bold" style="font-size:1.9rem;color:#2E6BA8">{{ d.all_extents|length }}</div>
+        <div class="small text-muted">extents no SOBR<br>{{ d.all_extents|join(', ') }}</div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="fw-bold mb-0">Cadeias com arquivos em 2+ extents (maior primeiro)</h6>
+      <span class="text-muted small">block cloning quebrado entre os extents listados</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light"><tr>
+          <th>Rotina</th>
+          <th>VM</th>
+          <th>Extents da cadeia</th>
+          <th class="text-end">Tamanho em disco</th>
+          <th class="text-end">Pontos</th>
+        </tr></thead>
+        <tbody>
+          {% for r in d.spread %}
+          <tr>
+            <td class="small">{{ r.job }}</td>
+            <td class="small fw-semibold">{{ r.vm }}</td>
+            <td>
+              {% for e in r.extents %}
+              <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle me-1">{{ e }}</span>
+              {% endfor %}
+            </td>
+            <td class="text-end small fw-semibold">{{ r.size|fmt_bytes }}</td>
+            <td class="text-end small text-muted">{{ r.points }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div></div>
+
+  <div class="alert alert-light border py-2 small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    Aparece aqui quando o mesmo <strong>VM tem arquivos (fulls) em mais de um extent</strong> —
+    tipicamente quando um extent enche e o full seguinte cai noutro, sem
+    <strong>block cloning</strong> (que só vale dentro de um mesmo extent), gravando cheio.
+    Considera apenas arquivos <strong>locais</strong> (o object storage não faz clone).
+    Recomendação: realinhar os fulls do VM num único extent (Data Locality / novo full)
+    assim que houver espaço.
+  </div>
+{% endif %}
+{% endblock %}

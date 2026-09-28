@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% block title %}Revisão — {{ report.client_name or "Relatório" }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-table me-2"></i>Revisão do Relatório
+    </h2>
+    <p class="page-subtitle mb-0">
+      <i class="bi bi-calendar-week me-1"></i>{{ week_label }}
+      &nbsp;|&nbsp; {{ total_jobs }} job(s) com falha &nbsp;|&nbsp;
+      {{ total_errors }} erro(s) no período
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/reports/new" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Novo relatório
+    </a>
+    <a href="/review/{{ report.id }}/export" class="btn btn-success btn-sm">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+    </a>
+  </div>
+</div>
+
+<!-- Totals panel -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-0 shadow-sm h-100">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ totals.total | format_number }}</div>
+        <div class="small text-muted">Execuções no período</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ totals.success | format_number }}</div>
+        <div class="small text-muted">Sucesso</div>
+        {% if totals.total > 0 %}
+        <div class="badge bg-success bg-opacity-75 mt-1">
+          {{ "%.1f"|format(totals.success / totals.total * 100) }}%
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-0 shadow-sm h-100 bg-warning bg-opacity-10">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-warning">{{ totals.warning | format_number }}</div>
+        <div class="small text-muted">Warning</div>
+        {% if totals.total > 0 %}
+        <div class="badge bg-warning text-dark bg-opacity-75 mt-1">
+          {{ "%.1f"|format(totals.warning / totals.total * 100) }}%
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center border-0 shadow-sm h-100 bg-danger bg-opacity-10">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-danger">{{ totals.failed | format_number }}</div>
+        <div class="small text-muted">Falhas</div>
+        {% if totals.total > 0 %}
+        <div class="badge bg-danger bg-opacity-75 mt-1">
+          {{ "%.1f"|format(totals.failed / totals.total * 100) }}%
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if totals.backup_total > 0 or totals.log_backup_total > 0 %}
+<div class="row g-2 mb-4">
+  {% if totals.backup_total > 0 %}
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-3">
+          <i class="bi bi-hdd-stack fs-4 text-primary"></i>
+          <div>
+            <div class="fw-semibold small">Backups regulares</div>
+            <div class="text-muted small">
+              <span class="text-success fw-bold">{{ totals.backup_success | format_number }}</span> sucesso
+              de {{ totals.backup_total | format_number }} execuções
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  {% if totals.log_backup_total > 0 %}
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-3">
+          <i class="bi bi-journal-code fs-4 text-warning"></i>
+          <div>
+            <div class="fw-semibold small">Transaction logs</div>
+            <div class="text-muted small">
+              <span class="text-success fw-bold">{{ totals.log_backup_success | format_number }}</span> sucesso
+              de {{ totals.log_backup_total | format_number }} execuções
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if request.query_params.get('saved') %}
+<div class="alert alert-success alert-dismissible fade show py-2">
+  <i class="bi bi-check-circle-fill me-2"></i>Alterações salvas com sucesso.
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<form action="/review/{{ report.id }}/save" method="post" id="reviewForm">
+  <!-- Client name & meta -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-center">
+        <div class="col-auto">
+          <label class="col-form-label fw-semibold small">Cliente:</label>
+        </div>
+        <div class="col-md-4">
+          <input type="text" name="client_name" class="form-control form-control-sm"
+                 value="{{ report.client_name or '' }}" placeholder="Nome do cliente">
+        </div>
+        <div class="col-auto ms-auto">
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-save me-1"></i>Salvar alterações
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if summaries %}
+
+  <!-- ── Filter bar ─────────────────────────────────────────────────────── -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body py-2">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="small fw-semibold text-muted me-1 flex-shrink-0">
+          <i class="bi bi-funnel me-1"></i>Filtrar:
+        </span>
+
+        <button class="review-chip active" data-filter="all" data-color="primary">
+          Todos
+          <span class="review-chip-badge" id="cntAll">{{ summaries|length }}</span>
+        </button>
+
+        <button class="review-chip" data-filter="error" data-color="danger">
+          <i class="bi bi-x-circle"></i> Com Erro
+          <span class="review-chip-badge" id="cntError">0</span>
+        </button>
+
+        <button class="review-chip" data-filter="warning" data-color="warning">
+          <i class="bi bi-exclamation-triangle"></i> Com Warning
+          <span class="review-chip-badge" id="cntWarning">0</span>
+        </button>
+
+        <span class="text-muted">|</span>
+
+        <button class="review-chip" data-filter="backup-error" data-color="danger">
+          <i class="bi bi-hdd-stack"></i> Backup + Erro
+          <span class="review-chip-badge" id="cntBackupErr">0</span>
+        </button>
+
+        <button class="review-chip" data-filter="log-error" data-color="warning">
+          <i class="bi bi-journal-code"></i> Log + Erro
+          <span class="review-chip-badge" id="cntLogErr">0</span>
+        </button>
+
+        <span class="ms-auto small text-muted fst-italic" id="filterStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Desktop table -->
+  <div class="d-none d-xl-block">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover align-middle review-table">
+        <thead class="table-dark">
+          <tr>
+            <th style="min-width:220px">Rotina de Backup</th>
+            <th class="text-center" style="width:90px">Erros<br>na Semana</th>
+            <th class="text-center" style="width:130px">Últimas<br>3 Execuções</th>
+            <th class="text-center" style="width:130px">Situação Atual</th>
+            <th style="min-width:180px">Ação em Andamento</th>
+            <th style="min-width:160px">Observação Técnica</th>
+            <th style="min-width:120px">Responsável</th>
+            <th style="min-width:110px">Ticket</th>
+            <th style="min-width:200px">Último Erro</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for js in summaries %}
+          <tr class="review-row"
+              data-type="{{ js.job_type }}"
+              data-failed="{{ js.failed_count }}"
+              data-warning="{{ js.warning_count }}">
+            <td class="fw-semibold small">
+              {{ js.job_name }}
+              {% if js.job_type == 'log_backup' %}
+              <span class="badge bg-warning text-dark ms-1" title="Transaction Log Backup">LOG</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              <span class="badge bg-danger fs-6">{{ js.failed_count }}</span>
+            </td>
+            <td class="text-center">
+              <span class="badge bg-secondary">{{ js.last3_summary }}</span>
+            </td>
+            <td class="text-center">
+              <select name="job_{{ js.id }}_situation" class="form-select form-select-sm situation-select">
+                {% for opt in ['Superado','Em observação','Instável','Ativo','Indefinido'] %}
+                <option value="{{ opt }}" {% if js.situation == opt %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <textarea name="job_{{ js.id }}_action_ongoing"
+                        class="form-control form-control-sm" rows="2"
+                        placeholder="Descreva a ação...">{{ js.action_ongoing or '' }}</textarea>
+            </td>
+            <td>
+              <textarea name="job_{{ js.id }}_technical_observation"
+                        class="form-control form-control-sm" rows="2"
+                        placeholder="Observação técnica...">{{ js.technical_observation or '' }}</textarea>
+            </td>
+            <td>
+              <input type="text" name="job_{{ js.id }}_responsible"
+                     class="form-control form-control-sm"
+                     value="{{ js.responsible or '' }}" placeholder="Analista">
+            </td>
+            <td>
+              <input type="text" name="job_{{ js.id }}_ticket"
+                     class="form-control form-control-sm"
+                     value="{{ js.ticket or '' }}" placeholder="#XXXX">
+            </td>
+            <td class="small text-muted" style="max-width:220px;overflow:hidden">
+              {% if js.last_error_message %}
+              <span title="{{ js.last_error_message }}">
+                {{ js.last_error_message[:120] }}{% if js.last_error_message|length > 120 %}…{% endif %}
+              </span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Mobile cards -->
+  <div class="d-xl-none">
+    {% for js in summaries %}
+    <div class="card shadow-sm mb-3 review-row"
+         data-type="{{ js.job_type }}"
+         data-failed="{{ js.failed_count }}"
+         data-warning="{{ js.warning_count }}">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold small">
+          {{ js.job_name }}
+          {% if js.job_type == 'log_backup' %}
+          <span class="badge bg-warning text-dark ms-1">LOG</span>
+          {% endif %}
+        </span>
+        <span class="badge bg-danger">{{ js.failed_count }} erro(s)</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <span class="text-muted small">Últimas 3:</span><br>
+            <span class="badge bg-secondary">{{ js.last3_summary }}</span>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold mb-1">Situação</label>
+            <select name="job_{{ js.id }}_situation" class="form-select form-select-sm situation-select">
+              {% for opt in ['Superado','Em observação','Instável','Ativo','Indefinido'] %}
+              <option value="{{ opt }}" {% if js.situation == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Ação em andamento</label>
+          <textarea name="job_{{ js.id }}_action_ongoing" class="form-control form-control-sm" rows="2"
+                    placeholder="Descreva a ação...">{{ js.action_ongoing or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Observação técnica</label>
+          <textarea name="job_{{ js.id }}_technical_observation" class="form-control form-control-sm" rows="2"
+                    placeholder="Observação...">{{ js.technical_observation or '' }}</textarea>
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small fw-semibold mb-1">Responsável</label>
+            <input type="text" name="job_{{ js.id }}_responsible" class="form-control form-control-sm"
+                   value="{{ js.responsible or '' }}" placeholder="Analista">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold mb-1">Ticket</label>
+            <input type="text" name="job_{{ js.id }}_ticket" class="form-control form-control-sm"
+                   value="{{ js.ticket or '' }}" placeholder="#XXXX">
+          </div>
+        </div>
+        {% if js.last_error_message %}
+        <div class="mt-2">
+          <span class="text-muted small">Último erro: {{ js.last_error_message[:150] }}{% if js.last_error_message|length > 150 %}…{% endif %}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="d-flex justify-content-between mt-3">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save me-1"></i>Salvar alterações
+    </button>
+    <a href="/review/{{ report.id }}/export" class="btn btn-success">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+    </a>
+  </div>
+
+  {% else %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    Nenhum job com falhas encontrado no período
+    <strong>{{ week_label }}</strong>.
+    <br>
+    <small>Verifique se o arquivo exportado contém eventos do período correto,
+    ou marque a opção "Incluir jobs sem falhas" ao fazer o upload.</small>
+  </div>
+  {% endif %}
+</form>
+
+<!-- Disclaimer -->
+<div class="alert alert-light border mt-4 small">
+  <i class="bi bi-info-circle me-2 text-info"></i>
+  <strong>Aviso de precisão:</strong>
+  Relatório gerado com base nos eventos exportados do Windows Event Viewer do Veeam Backup &amp; Replication.
+  A precisão depende da integridade do arquivo exportado, da retenção dos eventos no servidor VBR
+  e da presença dos eventos de finalização de job no período analisado.
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Situation select styling ──────────────────────────────────────────────
+  const SIT_CLASSES = {
+    'Superado':       'sit-superado',
+    'Em observação':  'sit-observacao',
+    'Instável':       'sit-instavel',
+    'Ativo':          'sit-ativo',
+    'Indefinido':     'sit-indefinido',
+  };
+
+  function styleSelect(sel) {
+    sel.className = 'form-select form-select-sm situation-select';
+    const cls = SIT_CLASSES[sel.value] || 'sit-indefinido';
+    sel.classList.add(cls);
+  }
+
+  document.querySelectorAll('.situation-select').forEach(sel => {
+    styleSelect(sel);
+    sel.addEventListener('change', () => styleSelect(sel));
+  });
+
+  // ── Review row filter ────────────────────────────────────────────────────
+  const rows = Array.from(document.querySelectorAll('.review-row'));
+  const chips = Array.from(document.querySelectorAll('.review-chip'));
+  let activeFilter = 'all';
+
+  // Count each category up front
+  const counts = { error: 0, warning: 0, 'backup-error': 0, 'log-error': 0 };
+  rows.forEach(r => {
+    const failed  = parseInt(r.dataset.failed)  || 0;
+    const warning = parseInt(r.dataset.warning) || 0;
+    const type    = r.dataset.type;
+    if (failed  > 0)                            counts['error']++;
+    if (warning > 0)                            counts['warning']++;
+    if (failed  > 0 && type === 'backup')       counts['backup-error']++;
+    if (failed  > 0 && type === 'log_backup')   counts['log-error']++;
+  });
+
+  document.getElementById('cntError').textContent     = counts['error'];
+  document.getElementById('cntWarning').textContent   = counts['warning'];
+  document.getElementById('cntBackupErr').textContent = counts['backup-error'];
+  document.getElementById('cntLogErr').textContent    = counts['log-error'];
+
+  function rowMatches(r, filter) {
+    const failed  = parseInt(r.dataset.failed)  || 0;
+    const warning = parseInt(r.dataset.warning) || 0;
+    const type    = r.dataset.type;
+    switch (filter) {
+      case 'all':          return true;
+      case 'error':        return failed  > 0;
+      case 'warning':      return warning > 0;
+      case 'backup-error': return failed  > 0 && type === 'backup';
+      case 'log-error':    return failed  > 0 && type === 'log_backup';
+    }
+    return true;
+  }
+
+  function applyFilter(filter) {
+    activeFilter = filter;
+    let visible = 0;
+
+    rows.forEach(r => {
+      const show = rowMatches(r, filter);
+      r.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+
+    // Update status text
+    const status = document.getElementById('filterStatus');
+    status.textContent = filter === 'all'
+      ? `${rows.length} rotina${rows.length !== 1 ? 's' : ''} no total`
+      : `${visible} de ${rows.length} exibida${visible !== 1 ? 's' : ''}`;
+
+    // Update chip active states
+    chips.forEach(c => c.classList.toggle('active', c.dataset.filter === filter));
+  }
+
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => applyFilter(chip.dataset.filter));
+  });
+
+  // Initialize status
+  applyFilter('all');
+</script>
+{% endblock %}

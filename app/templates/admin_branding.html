@@ -1,0 +1,1054 @@
+{% extends "base.html" %}
+{% block title %}Identidade Visual — {{ get_branding()['system_name'] }}{% endblock %}
+
+{% block content %}
+
+<!-- ── Cabeçalho ──────────────────────────────────────────────────────────── -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+  <div class="d-flex align-items-center gap-3">
+    <div style="width:40px;height:40px;background:var(--brand-primary);border-radius:10px;display:flex;align-items:center;justify-content:center">
+      <i class="bi bi-palette-fill text-white fs-5"></i>
+    </div>
+    <div>
+      <h5 class="mb-0 fw-bold">Identidade Visual</h5>
+      <p class="text-muted small mb-0">Logotipos, paleta de cores, templates e textos do sistema</p>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-sm btn-outline-secondary" id="btnExportJson" title="Exportar configuração atual como JSON">
+      <i class="bi bi-download me-1"></i>Exportar JSON
+    </button>
+    <label class="btn btn-sm btn-outline-secondary mb-0" for="inputImportJson" title="Importar configuração de um arquivo JSON" style="cursor:pointer">
+      <i class="bi bi-upload me-1"></i>Importar JSON
+    </label>
+    <input type="file" id="inputImportJson" accept=".json" class="d-none">
+    <button class="btn btn-sm btn-outline-danger" id="btnRestoreBase">
+      <i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar HelloIT
+    </button>
+    <button class="btn btn-primary" id="btnSaveProfile">
+      <i class="bi bi-check-lg me-1"></i>Salvar
+    </button>
+  </div>
+</div>
+
+<!-- Toast de feedback -->
+<div class="position-fixed top-0 end-0 p-3" style="z-index:9999">
+  <div id="toastFeedback" class="toast align-items-center text-white border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">Salvo com sucesso.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Seletor de perfil ──────────────────────────────────────────────────── -->
+<div class="card mb-3 border-0 shadow-sm">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <span class="text-muted small fw-semibold text-nowrap">
+        <i class="bi bi-layers me-1"></i>Perfil:
+      </span>
+      <select class="form-select form-select-sm" id="selProfile" style="max-width:320px">
+        <option value="">Carregando...</option>
+      </select>
+      <button class="btn btn-sm btn-outline-primary" id="btnNewClientProfile">
+        <i class="bi bi-plus-circle me-1"></i>Novo perfil por cliente
+      </button>
+      <button class="btn btn-sm btn-outline-danger d-none" id="btnDeleteProfile">
+        <i class="bi bi-trash me-1"></i>Excluir perfil
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Abas ───────────────────────────────────────────────────────────────── -->
+<ul class="nav nav-tabs" id="brandingTabs">
+  <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabGeral"><i class="bi bi-info-circle me-1"></i>Geral</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCores"><i class="bi bi-palette me-1"></i>Cores</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLogos"><i class="bi bi-image me-1"></i>Logotipos</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPPTX"><i class="bi bi-easel me-1"></i>PowerPoint</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPreview"><i class="bi bi-eye me-1"></i>Preview</button></li>
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom bg-white p-4 mb-4" id="brandingTabContent">
+
+  <!-- ── Aba Geral ──────────────────────────────────────────────────────── -->
+  <div class="tab-pane fade show active" id="tabGeral">
+    <div class="row g-4">
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Identificação do sistema</h6>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Nome do sistema</label>
+          <input type="text" class="form-control" id="fldSystemName" placeholder="Veeam Reporter">
+          <div class="form-text">Exibido no título de páginas e relatórios.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Nome curto</label>
+          <input type="text" class="form-control" id="fldShortName" placeholder="VER">
+          <div class="form-text">Usado em contextos compactos (mobile, PDF).</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Nome da empresa / marca</label>
+          <input type="text" class="form-control" id="fldCompanyName" placeholder="HelloIT">
+        </div>
+      </div>
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Textos e contato</h6>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Texto do cabeçalho</label>
+          <input type="text" class="form-control" id="fldHeaderText" placeholder="HelloIT">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Texto do rodapé</label>
+          <input type="text" class="form-control" id="fldFooterText" placeholder="Infraestrutura, Redes e Cibersegurança | helloit.com.br">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Site da empresa</label>
+          <input type="url" class="form-control" id="fldWebsiteUrl" placeholder="https://helloit.com.br">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">E-mail de contato</label>
+          <input type="email" class="form-control" id="fldContactEmail" placeholder="suporte@empresa.com.br">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Aba Cores ──────────────────────────────────────────────────────── -->
+  <div class="tab-pane fade" id="tabCores">
+    <div class="row g-3">
+      <div class="col-12">
+        <div class="alert alert-info py-2 small">
+          <i class="bi bi-info-circle me-1"></i>
+          As cores são aplicadas imediatamente na interface web, nos relatórios Excel e nos slides de conteúdo do PowerPoint.
+          Após salvar, recarregue a página para ver todas as alterações.
+        </div>
+      </div>
+
+      <!-- Cores principais -->
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Cores da marca</h6>
+        {% set color_fields = [
+          ('primary_color',   'fldPrimary',   'Cor primária',   'Navbar, botões, cabeçalhos, links'),
+          ('secondary_color', 'fldSecondary', 'Cor secundária', 'Hover de botões, bordas ativas'),
+          ('accent_color',    'fldAccent',    'Cor de destaque', 'Separadores, indicadores, foco'),
+        ] %}
+        {% for fname, fid, label, hint in color_fields %}
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <input type="color" class="branding-color-swatch border-0 p-0"
+                 id="{{ fid }}" style="width:40px;height:40px;border-radius:8px;cursor:pointer"
+                 data-field="{{ fname }}">
+          <div class="flex-grow-1">
+            <div class="fw-semibold small">{{ label }}</div>
+            <div class="text-muted" style="font-size:.75rem">{{ hint }}</div>
+          </div>
+          <input type="text" class="form-control form-control-sm font-monospace"
+                 id="{{ fid }}Hex" maxlength="7" style="width:90px"
+                 data-pair="{{ fid }}">
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Status + interface -->
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Status e interface</h6>
+        {% set color_fields2 = [
+          ('success_color',        'fldSuccess',      'Sucesso',             'Badges, indicadores positivos'),
+          ('warning_color',        'fldWarning',      'Aviso / Warning',     'Badges e alertas de atenção'),
+          ('danger_color',         'fldDanger',       'Erro / Falha',        'Badges, alertas críticos'),
+          ('background_color',     'fldBg',           'Fundo da página',     'Cor de fundo principal'),
+          ('card_bg_color',        'fldCardBg',       'Fundo dos cards',     'Cor de fundo de cards e painéis'),
+          ('table_header_color',   'fldTableHdr',     'Cabeçalho de tabela', 'Fundo da linha de título das tabelas'),
+          ('text_primary_color',   'fldTextPrimary',  'Texto principal',     'Cor do texto padrão'),
+          ('text_secondary_color', 'fldTextSecondary','Texto secundário',    'Subtítulos, hints, texto muted'),
+        ] %}
+        {% for fname, fid, label, hint in color_fields2 %}
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <input type="color" class="branding-color-swatch border-0 p-0"
+                 id="{{ fid }}" style="width:40px;height:40px;border-radius:8px;cursor:pointer"
+                 data-field="{{ fname }}">
+          <div class="flex-grow-1">
+            <div class="fw-semibold small">{{ label }}</div>
+            <div class="text-muted" style="font-size:.75rem">{{ hint }}</div>
+          </div>
+          <input type="text" class="form-control form-control-sm font-monospace"
+                 id="{{ fid }}Hex" maxlength="7" style="width:90px"
+                 data-pair="{{ fid }}">
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Aba Logotipos ─────────────────────────────────────────────────── -->
+  <div class="tab-pane fade" id="tabLogos">
+    <div class="row g-4">
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Logotipo principal</h6>
+        <p class="small text-muted mb-3">Usado na barra de navegação e demais páginas do sistema.</p>
+        <div class="branding-upload-zone" id="zoneLogoMain" data-field="logo_main_path" data-accept=".png,.jpg,.jpeg,.svg,.webp">
+          <img src="" alt="" class="branding-upload-thumb d-none" id="thumbLogoMain">
+          <div id="hintLogoMain">
+            <i class="bi bi-cloud-upload fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">PNG, JPG, SVG ou WEBP · máx. 2 MB</span><br>
+            <span class="small text-muted">Recomendado: fundo transparente (PNG)</span>
+          </div>
+          <input type="file" class="d-none" id="fileLogoMain" accept=".png,.jpg,.jpeg,.svg,.webp">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsLogoMain">
+          <button class="btn btn-sm btn-outline-danger" data-remove="logo_main_path">
+            <i class="bi bi-trash me-1"></i>Remover logo
+          </button>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Logotipo da tela de login</h6>
+        <p class="small text-muted mb-3">Exibido no painel esquerdo da tela de login. Se não configurado, usa o logo principal.</p>
+        <div class="branding-upload-zone" id="zoneLogoLogin" data-field="logo_login_path" data-accept=".png,.jpg,.jpeg,.svg,.webp">
+          <img src="" alt="" class="branding-upload-thumb d-none" id="thumbLogoLogin">
+          <div id="hintLogoLogin">
+            <i class="bi bi-cloud-upload fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">PNG, JPG, SVG ou WEBP · máx. 2 MB</span><br>
+            <span class="small text-muted">Recomendado: logotipo branco / transparente</span>
+          </div>
+          <input type="file" class="d-none" id="fileLogoLogin" accept=".png,.jpg,.jpeg,.svg,.webp">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsLogoLogin">
+          <button class="btn btn-sm btn-outline-danger" data-remove="logo_login_path">
+            <i class="bi bi-trash me-1"></i>Remover logo
+          </button>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Logo para relatórios (Excel / PPTX)</h6>
+        <p class="small text-muted mb-3">Inserido no cabeçalho dos slides e relatórios gerados.</p>
+        <div class="branding-upload-zone" id="zoneLogoReport" data-field="logo_report_path" data-accept=".png,.jpg,.jpeg">
+          <img src="" alt="" class="branding-upload-thumb d-none" id="thumbLogoReport">
+          <div id="hintLogoReport">
+            <i class="bi bi-cloud-upload fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">PNG ou JPG · máx. 2 MB</span><br>
+            <span class="small text-muted">Recomendado: fundo branco ou transparente</span>
+          </div>
+          <input type="file" class="d-none" id="fileLogoReport" accept=".png,.jpg,.jpeg">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsLogoReport">
+          <button class="btn btn-sm btn-outline-danger" data-remove="logo_report_path">
+            <i class="bi bi-trash me-1"></i>Remover logo
+          </button>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Favicon</h6>
+        <p class="small text-muted mb-3">Ícone exibido na aba do navegador.</p>
+        <div class="branding-upload-zone" id="zoneLogoFav" data-field="favicon_path" data-accept=".ico,.png">
+          <img src="" alt="" class="branding-upload-thumb d-none" id="thumbLogoFav" style="max-height:48px">
+          <div id="hintLogoFav">
+            <i class="bi bi-cloud-upload fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">ICO ou PNG · máx. 512 KB · ideal 32×32 px</span>
+          </div>
+          <input type="file" class="d-none" id="fileLogoFav" accept=".ico,.png">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsLogoFav">
+          <button class="btn btn-sm btn-outline-danger" data-remove="favicon_path">
+            <i class="bi bi-trash me-1"></i>Remover favicon
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Aba PowerPoint ────────────────────────────────────────────────── -->
+  <div class="tab-pane fade" id="tabPPTX">
+    <div class="alert alert-warning small py-2 mb-4">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      O arquivo PPTX de template deve ter no mínimo <strong>2 slides</strong>: o primeiro é usado como capa e o último como slide de encerramento.
+      Os slides de conteúdo são gerados e inseridos entre eles.
+      Se nenhum template for configurado, o padrão HelloIT é utilizado.
+    </div>
+    <div class="row g-4">
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Template PPTX completo</h6>
+        <p class="small text-muted mb-3">
+          Substitui o template padrão HelloIT. O slide 1 é usado como capa e o último slide como encerramento.
+          Gera relatórios semanais no padrão visual definido neste arquivo.
+        </p>
+        <div class="branding-upload-zone" id="zonePptxCover" data-field="pptx_cover_path" data-accept=".pptx">
+          <div id="hintPptxCover">
+            <i class="bi bi-easel fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">Arquivo PPTX · máx. 20 MB</span><br>
+            <span class="small text-muted">Deve conter capa + slide de encerramento</span>
+          </div>
+          <div id="namePptxCover" class="d-none">
+            <i class="bi bi-file-earmark-ppt fs-3 text-primary d-block mb-1"></i>
+            <span class="small fw-semibold" id="lblPptxCover">template.pptx</span>
+          </div>
+          <input type="file" class="d-none" id="filePptxCover" accept=".pptx">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsPptxCover">
+          <span class="badge bg-success"><i class="bi bi-check me-1"></i>Template ativo</span>
+          <button class="btn btn-sm btn-outline-danger" data-remove="pptx_cover_path">
+            <i class="bi bi-trash me-1"></i>Remover (voltar HelloIT)
+          </button>
+        </div>
+        <div class="mt-3 text-muted small">
+          <i class="bi bi-shield-check me-1 text-success"></i>
+          Se não configurado: usa template HelloIT padrão (<code>template.pptx</code>)
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <h6 class="fw-semibold mb-3 text-muted text-uppercase" style="font-size:.72rem;letter-spacing:.08em">Slide final personalizado</h6>
+        <p class="small text-muted mb-3">
+          Opcional. Se configurado, o último slide deste arquivo substitui o slide de encerramento do template principal.
+          Útil para personalizar apenas o encerramento sem trocar a capa.
+        </p>
+        <div class="branding-upload-zone" id="zonePptxFinal" data-field="pptx_final_slide_path" data-accept=".pptx">
+          <div id="hintPptxFinal">
+            <i class="bi bi-easel2 fs-4 text-muted d-block mb-1"></i>
+            <span class="small text-muted">Arquivo PPTX · máx. 20 MB</span><br>
+            <span class="small text-muted">O primeiro slide é usado como encerramento</span>
+          </div>
+          <div id="namePptxFinal" class="d-none">
+            <i class="bi bi-file-earmark-ppt fs-3 text-primary d-block mb-1"></i>
+            <span class="small fw-semibold" id="lblPptxFinal">final.pptx</span>
+          </div>
+          <input type="file" class="d-none" id="filePptxFinal" accept=".pptx">
+        </div>
+        <div class="mt-2 d-flex gap-2 d-none" id="actionsPptxFinal">
+          <span class="badge bg-success"><i class="bi bi-check me-1"></i>Slide final ativo</span>
+          <button class="btn btn-sm btn-outline-danger" data-remove="pptx_final_slide_path">
+            <i class="bi bi-trash me-1"></i>Remover
+          </button>
+        </div>
+        <div class="mt-3 text-muted small">
+          <i class="bi bi-shield-check me-1 text-success"></i>
+          Se não configurado: usa o último slide do template principal
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Aba Preview ───────────────────────────────────────────────────── -->
+  <div class="tab-pane fade" id="tabPreview">
+    <p class="text-muted small mb-4">
+      <i class="bi bi-eye me-1"></i>
+      Preview ao vivo. Os componentes abaixo refletem as cores configuradas na aba <strong>Cores</strong>.
+      Para ver o resultado completo, salve e recarregue a página.
+    </p>
+
+    <!-- Mini Navbar -->
+    <div class="mb-3">
+      <div class="small fw-semibold text-muted text-uppercase mb-1" style="font-size:.7rem;letter-spacing:.08em">Navbar</div>
+      <div class="branding-preview-navbar" id="prevNavbar">
+        <div>
+          <div style="font-size:1rem;font-weight:800;letter-spacing:-.03em" id="prevNavCompany">HelloIT</div>
+          <div style="font-size:.6rem;letter-spacing:.08em;opacity:.8;text-transform:uppercase" id="prevNavSystem">Veeam Reporter</div>
+        </div>
+        <div class="ms-auto d-flex gap-2">
+          <span style="font-size:.8rem;opacity:.85">Dashboards</span>
+          <span style="font-size:.8rem;opacity:.85">Importar</span>
+          <span style="font-size:.8rem;opacity:.85">Admin</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI Cards e botões -->
+    <div class="row g-3 mb-3">
+      <div class="col-md-3">
+        <div class="small fw-semibold text-muted text-uppercase mb-1" style="font-size:.7rem;letter-spacing:.08em">Botão primário</div>
+        <button class="btn btn-primary w-100" id="prevBtnPrimary">
+          <i class="bi bi-check-circle me-1"></i>Salvar relatório
+        </button>
+      </div>
+      <div class="col-md-3">
+        <div class="small fw-semibold text-muted text-uppercase mb-1" style="font-size:.7rem;letter-spacing:.08em">Badges de status</div>
+        <div class="d-flex gap-2 flex-wrap">
+          <span class="badge" id="prevBadgeSuccess">Sucesso</span>
+          <span class="badge" id="prevBadgeWarning">Warning</span>
+          <span class="badge" id="prevBadgeDanger">Falha</span>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="small fw-semibold text-muted text-uppercase mb-1" style="font-size:.7rem;letter-spacing:.08em">Card KPI</div>
+        <div class="branding-preview-card d-flex align-items-center gap-3" id="prevCard">
+          <div>
+            <div style="font-size:1.8rem;font-weight:800;letter-spacing:-.03em;line-height:1" id="prevKpiNum">1.247</div>
+            <div class="text-muted small" id="prevKpiLabel">Eventos no período</div>
+          </div>
+          <div class="ms-auto">
+            <i class="bi bi-bar-chart-fill fs-3" id="prevKpiIcon"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabela de exemplo -->
+    <div class="mb-3">
+      <div class="small fw-semibold text-muted text-uppercase mb-1" style="font-size:.7rem;letter-spacing:.08em">Cabeçalho de tabela</div>
+      <table class="table table-sm table-bordered mb-0" style="font-size:.83rem">
+        <thead>
+          <tr id="prevTableHead">
+            <th style="padding:.5rem .75rem">Job / VM</th>
+            <th style="padding:.5rem .75rem">Cliente</th>
+            <th style="padding:.5rem .75rem">Resultado</th>
+            <th style="padding:.5rem .75rem">Última execução</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Backup Servidor DB01</td>
+            <td>Acme Corp</td>
+            <td><span class="badge" id="prevBadgeSuccess2">Sucesso</span></td>
+            <td>2025-01-15 03:45</td>
+          </tr>
+          <tr style="background:#f8f9fa">
+            <td>Backup Servidor APP02</td>
+            <td>Acme Corp</td>
+            <td><span class="badge" id="prevBadgeDanger2">Falha</span></td>
+            <td>2025-01-14 22:10</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Rodapé -->
+    <div class="mt-3 py-2 border-top text-center">
+      <small class="text-muted">
+        <span id="prevFooterCompany" class="fw-semibold">HelloIT</span>
+        &nbsp;·&nbsp; <span id="prevFooterSystem">Veeam Reporter</span>
+        &nbsp;·&nbsp; <span id="prevFooterText">Infraestrutura, Redes e Cibersegurança | helloit.com.br</span>
+      </small>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Modal: novo perfil por cliente ────────────────────────────────────── -->
+<div class="modal fade" id="modalNewClientProfile" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Novo perfil por cliente</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted">
+          Cria um perfil de identidade visual específico para um cliente.
+          Quando um relatório for gerado para esse cliente, as configurações deste perfil serão usadas no lugar do perfil global.
+        </p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Cliente</label>
+          <select class="form-select" id="selNewClientId">
+            <option value="">Selecione um cliente...</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Nome do perfil</label>
+          <input type="text" class="form-control" id="fldNewProfileName" placeholder="Ex.: Acme Corp — Identidade">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmNewProfile">Criar perfil</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: confirmação restaurar HelloIT ─────────────────────────────── -->
+<div class="modal fade" id="modalRestoreConfirm" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header border-0">
+        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-2 text-warning"></i>Restaurar padrão HelloIT</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Isso irá restaurar <strong>todas as cores, textos e nome do sistema</strong> do perfil selecionado para o padrão HelloIT.</p>
+        <p class="text-muted small mb-0">Os logotipos e templates PPTX enviados <strong>não são removidos</strong> — apenas as configurações de texto e cores são resetadas.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-warning" id="btnConfirmRestore">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Estado ─────────────────────────────────────────────────────────────────
+let _profileId    = null;
+let _profileData  = {};
+let _profileList  = [];
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadProfileList();
+  setupColorPickers();
+  setupUploadZones();
+  setupActions();
+});
+
+// ── Toast ────────────────────────────────────────────────────────────────
+function showToast(msg, ok = true) {
+  const el = document.getElementById('toastFeedback');
+  el.className = `toast align-items-center text-white border-0 bg-${ok ? 'success' : 'danger'}`;
+  document.getElementById('toastMsg').textContent = msg;
+  bootstrap.Toast.getOrCreateInstance(el, { delay: 3500 }).show();
+}
+
+// ── Carregamento de perfis ────────────────────────────────────────────────
+async function loadProfileList() {
+  const res = await fetch('/api/admin/branding');
+  _profileList = await res.json();
+
+  // Preenche clientes no modal
+  await loadClientsForModal();
+
+  const sel = document.getElementById('selProfile');
+  sel.innerHTML = '';
+  _profileList.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.client_id
+      ? `🏢 Cliente: ${p.name}`
+      : `🌐 ${p.name}${p.is_default ? ' (padrão)' : ''}`;
+    sel.appendChild(opt);
+  });
+
+  // Seleciona o perfil global padrão por default
+  const defaultProfile = _profileList.find(p => p.is_default && !p.client_id);
+  if (defaultProfile) {
+    sel.value = defaultProfile.id;
+  } else if (_profileList.length > 0) {
+    sel.value = _profileList[0].id;
+  }
+  onProfileChange();
+}
+
+async function loadClientsForModal() {
+  try {
+    const res = await fetch('/api/clients');
+    const clients = await res.json();
+    const sel = document.getElementById('selNewClientId');
+    sel.innerHTML = '<option value="">Selecione um cliente...</option>';
+
+    // Remove clientes que já têm perfil
+    const usedClientIds = _profileList
+      .filter(p => p.client_id)
+      .map(p => p.client_id);
+
+    clients.forEach(c => {
+      if (!usedClientIds.includes(c.id)) {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        sel.appendChild(opt);
+      }
+    });
+  } catch(e) { /* silently fail */ }
+}
+
+function onProfileChange() {
+  const sel = document.getElementById('selProfile');
+  _profileId = parseInt(sel.value);
+  _profileData = _profileList.find(p => p.id === _profileId) || {};
+  populateForm(_profileData);
+  updatePreview();
+
+  // Oculta botão excluir para o perfil global padrão
+  const isDefault = _profileData.is_default && !_profileData.client_id;
+  document.getElementById('btnDeleteProfile').classList.toggle('d-none', isDefault);
+}
+
+document.getElementById('selProfile').addEventListener('change', onProfileChange);
+
+// ── Popula formulário ─────────────────────────────────────────────────────
+function populateForm(data) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val || '';
+  };
+
+  set('fldSystemName',   data.system_name);
+  set('fldShortName',    data.short_name);
+  set('fldCompanyName',  data.company_name);
+  set('fldHeaderText',   data.header_text);
+  set('fldFooterText',   data.footer_text);
+  set('fldWebsiteUrl',   data.website_url);
+  set('fldContactEmail', data.contact_email);
+
+  // Cores
+  const colorMap = {
+    'fldPrimary':      data.primary_color,
+    'fldSecondary':    data.secondary_color,
+    'fldAccent':       data.accent_color,
+    'fldSuccess':      data.success_color,
+    'fldWarning':      data.warning_color,
+    'fldDanger':       data.danger_color,
+    'fldBg':           data.background_color,
+    'fldCardBg':       data.card_bg_color,
+    'fldTableHdr':     data.table_header_color,
+    'fldTextPrimary':  data.text_primary_color,
+    'fldTextSecondary':data.text_secondary_color,
+  };
+  Object.entries(colorMap).forEach(([id, val]) => {
+    if (!val) return;
+    const picker = document.getElementById(id);
+    const hex    = document.getElementById(id + 'Hex');
+    if (picker) picker.value = val;
+    if (hex)    hex.value    = val;
+  });
+
+  // Logos
+  setupThumb('LogoMain',   data.logo_main_path,        true);
+  setupThumb('LogoLogin',  data.logo_login_path,       true);
+  setupThumb('LogoReport', data.logo_report_path,      true);
+  setupThumb('LogoFav',    data.favicon_path,          true);
+  setupPptxName('PptxCover', data.pptx_cover_path);
+  setupPptxName('PptxFinal', data.pptx_final_slide_path);
+}
+
+function setupThumb(key, path, fromLoad) {
+  const thumb   = document.getElementById('thumb' + key);
+  const hint    = document.getElementById('hint' + key);
+  const actions = document.getElementById('actions' + key);
+  const zone    = document.getElementById('zone' + key);
+  if (!thumb) return;
+
+  if (path) {
+    thumb.src = `/branding/file/${path}`;
+    thumb.classList.remove('d-none');
+    hint.classList.add('d-none');
+    actions && actions.classList.remove('d-none');
+    zone && zone.classList.add('has-file');
+  } else {
+    thumb.src = '';
+    thumb.classList.add('d-none');
+    hint.classList.remove('d-none');
+    actions && actions.classList.add('d-none');
+    zone && zone.classList.remove('has-file');
+  }
+}
+
+function setupPptxName(key, path) {
+  const hint    = document.getElementById('hint' + key);
+  const nameDiv = document.getElementById('name' + key);
+  const lbl     = document.getElementById('lbl' + key);
+  const actions = document.getElementById('actions' + key);
+  const zone    = document.getElementById('zone' + key);
+  if (!hint) return;
+
+  if (path) {
+    const fname = path.split('/').pop();
+    lbl.textContent = fname;
+    hint.classList.add('d-none');
+    nameDiv.classList.remove('d-none');
+    actions.classList.remove('d-none');
+    zone && zone.classList.add('has-file');
+  } else {
+    hint.classList.remove('d-none');
+    nameDiv.classList.add('d-none');
+    actions.classList.add('d-none');
+    zone && zone.classList.remove('has-file');
+  }
+}
+
+// ── Cores: pickers + hex inputs ──────────────────────────────────────────
+function setupColorPickers() {
+  document.querySelectorAll('input[type="color"][data-field]').forEach(picker => {
+    const hexId = picker.id + 'Hex';
+    const hexInput = document.getElementById(hexId);
+
+    picker.addEventListener('input', () => {
+      if (hexInput) hexInput.value = picker.value;
+      applyColorToPreview(picker.dataset.field, picker.value);
+      applyLiveCssVar(picker.dataset.field, picker.value);
+    });
+
+    if (hexInput) {
+      hexInput.addEventListener('input', () => {
+        const val = hexInput.value;
+        if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+          picker.value = val;
+          applyColorToPreview(picker.dataset.field, val);
+          applyLiveCssVar(picker.dataset.field, val);
+        }
+      });
+    }
+  });
+}
+
+const FIELD_TO_CSS = {
+  'primary_color':        '--brand-primary',
+  'secondary_color':      '--brand-secondary',
+  'accent_color':         '--brand-accent',
+  'success_color':        '--brand-success',
+  'warning_color':        '--brand-warning',
+  'danger_color':         '--brand-danger',
+  'background_color':     '--brand-bg',
+  'card_bg_color':        '--brand-card-bg',
+  'table_header_color':   '--brand-table-header',
+  'text_primary_color':   '--brand-text-primary',
+  'text_secondary_color': '--brand-text-secondary',
+};
+
+function applyLiveCssVar(field, val) {
+  const cssVar = FIELD_TO_CSS[field];
+  if (cssVar) document.documentElement.style.setProperty(cssVar, val);
+}
+
+function applyColorToPreview(field, val) {
+  switch(field) {
+    case 'primary_color':
+      document.getElementById('prevNavbar').style.background = val;
+      document.getElementById('prevBtnPrimary').style.background = val;
+      document.getElementById('prevBtnPrimary').style.borderColor = val;
+      document.getElementById('prevKpiIcon').style.color = val;
+      document.getElementById('prevFooterCompany').style.color = val;
+      break;
+    case 'success_color':
+      ['prevBadgeSuccess','prevBadgeSuccess2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.background = val; el.style.color = '#fff'; }
+      });
+      break;
+    case 'warning_color':
+      document.getElementById('prevBadgeWarning').style.background = val;
+      document.getElementById('prevBadgeWarning').style.color = '#1a1a1a';
+      break;
+    case 'danger_color':
+      ['prevBadgeDanger','prevBadgeDanger2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.background = val; el.style.color = '#fff'; }
+      });
+      break;
+    case 'table_header_color':
+      const th = document.getElementById('prevTableHead');
+      if (th) { th.style.background = val; th.style.color = '#fff'; }
+      break;
+    case 'card_bg_color':
+      document.getElementById('prevCard').style.background = val;
+      break;
+    case 'background_color':
+      document.getElementById('tabPreview').style.background = val;
+      break;
+    case 'text_primary_color':
+      document.getElementById('prevKpiLabel').style.color = val;
+      break;
+  }
+}
+
+function updatePreview() {
+  const d = _profileData;
+  if (!d || !d.primary_color) return;
+
+  // Navbar
+  document.getElementById('prevNavbar').style.background = d.primary_color;
+  document.getElementById('prevNavCompany').textContent  = d.company_name || 'Empresa';
+  document.getElementById('prevNavSystem').textContent   = d.system_name  || 'Sistema';
+
+  // Botão
+  document.getElementById('prevBtnPrimary').style.background  = d.primary_color;
+  document.getElementById('prevBtnPrimary').style.borderColor = d.primary_color;
+
+  // Badges
+  const applyBadge = (ids, bg, color) => ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.background = bg; el.style.color = color; }
+  });
+  applyBadge(['prevBadgeSuccess','prevBadgeSuccess2'], d.success_color,'#fff');
+  applyBadge(['prevBadgeWarning'],  d.warning_color, '#1a1a1a');
+  applyBadge(['prevBadgeDanger','prevBadgeDanger2'],  d.danger_color,  '#fff');
+
+  // Tabela header
+  const th = document.getElementById('prevTableHead');
+  th.style.background = d.table_header_color;
+  th.style.color = '#fff';
+
+  // Card bg
+  document.getElementById('prevCard').style.background = d.card_bg_color;
+
+  // KPI icon
+  document.getElementById('prevKpiIcon').style.color = d.primary_color;
+
+  // Footer
+  document.getElementById('prevFooterCompany').style.color = d.primary_color;
+  document.getElementById('prevFooterCompany').textContent = d.company_name || 'Empresa';
+  document.getElementById('prevFooterSystem').textContent  = d.system_name  || 'Sistema';
+  document.getElementById('prevFooterText').textContent    = d.footer_text  || '';
+}
+
+// ── Upload zones ──────────────────────────────────────────────────────────
+function setupUploadZones() {
+  const zones = [
+    { zone: 'zoneLogoMain',   file: 'fileLogoMain',   thumb: 'LogoMain',   field: 'logo_main_path',        maxMB: 2 },
+    { zone: 'zoneLogoLogin',  file: 'fileLogoLogin',  thumb: 'LogoLogin',  field: 'logo_login_path',       maxMB: 2 },
+    { zone: 'zoneLogoReport', file: 'fileLogoReport', thumb: 'LogoReport', field: 'logo_report_path',      maxMB: 2 },
+    { zone: 'zoneLogoFav',    file: 'fileLogoFav',    thumb: 'LogoFav',    field: 'favicon_path',          maxMB: 0.5 },
+    { zone: 'zonePptxCover',  file: 'filePptxCover',  thumb: null,         field: 'pptx_cover_path',       maxMB: 20, pptx: 'PptxCover' },
+    { zone: 'zonePptxFinal',  file: 'filePptxFinal',  thumb: null,         field: 'pptx_final_slide_path', maxMB: 20, pptx: 'PptxFinal' },
+  ];
+
+  zones.forEach(({ zone, file, thumb, field, maxMB, pptx }) => {
+    const zoneEl = document.getElementById(zone);
+    const fileEl = document.getElementById(file);
+    if (!zoneEl || !fileEl) return;
+
+    zoneEl.addEventListener('click', () => fileEl.click());
+    zoneEl.addEventListener('dragover', e => { e.preventDefault(); zoneEl.style.borderColor = 'var(--brand-primary)'; });
+    zoneEl.addEventListener('dragleave', () => zoneEl.style.borderColor = '');
+    zoneEl.addEventListener('drop', e => {
+      e.preventDefault();
+      zoneEl.style.borderColor = '';
+      const dt = e.dataTransfer;
+      if (dt.files.length) handleFileUpload(dt.files[0], field, thumb, pptx, maxMB);
+    });
+
+    fileEl.addEventListener('change', () => {
+      if (fileEl.files.length) handleFileUpload(fileEl.files[0], field, thumb, pptx, maxMB);
+    });
+  });
+}
+
+async function handleFileUpload(file, field, thumbKey, pptxKey, maxMB) {
+  if (file.size > maxMB * 1024 * 1024) {
+    showToast(`Arquivo muito grande. Máximo: ${maxMB} MB`, false);
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('field', field);
+
+  try {
+    const res = await fetch(`/api/admin/branding/${_profileId}/upload`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.detail || 'Erro no upload', false);
+      return;
+    }
+    const data = await res.json();
+    // Refresh profile data
+    _profileData[field] = data.path;
+
+    if (thumbKey) {
+      setupThumb(thumbKey, data.path, false);
+    }
+    if (pptxKey) {
+      setupPptxName(pptxKey, data.path);
+    }
+    showToast('Arquivo enviado com sucesso!');
+  } catch(e) {
+    showToast('Erro ao enviar arquivo.', false);
+  }
+}
+
+// ── Ações: remover arquivo ────────────────────────────────────────────────
+function setupActions() {
+  document.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const field = btn.dataset.remove;
+      await removeFile(field);
+    });
+  });
+}
+
+async function removeFile(field) {
+  const res = await fetch(`/api/admin/branding/${_profileId}/remove-file`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field }),
+  });
+  if (res.ok) {
+    _profileData[field] = null;
+    // Reset UI
+    const thumbMap = {
+      logo_main_path:        'LogoMain',
+      logo_login_path:       'LogoLogin',
+      logo_report_path:      'LogoReport',
+      favicon_path:          'LogoFav',
+    };
+    const pptxMap = {
+      pptx_cover_path:       'PptxCover',
+      pptx_final_slide_path: 'PptxFinal',
+    };
+    if (thumbMap[field]) setupThumb(thumbMap[field], null);
+    if (pptxMap[field])  setupPptxName(pptxMap[field], null);
+    showToast('Arquivo removido.');
+  } else {
+    showToast('Erro ao remover.', false);
+  }
+}
+
+// ── Salvar perfil ─────────────────────────────────────────────────────────
+document.getElementById('btnSaveProfile').addEventListener('click', async () => {
+  const data = {
+    name:         document.getElementById('fldSystemName').value.trim() || _profileData.name,
+    system_name:  document.getElementById('fldSystemName').value.trim(),
+    short_name:   document.getElementById('fldShortName').value.trim(),
+    company_name: document.getElementById('fldCompanyName').value.trim(),
+    header_text:  document.getElementById('fldHeaderText').value.trim(),
+    footer_text:  document.getElementById('fldFooterText').value.trim(),
+    website_url:  document.getElementById('fldWebsiteUrl').value.trim(),
+    contact_email:document.getElementById('fldContactEmail').value.trim(),
+
+    primary_color:        document.getElementById('fldPrimary').value,
+    secondary_color:      document.getElementById('fldSecondary').value,
+    accent_color:         document.getElementById('fldAccent').value,
+    success_color:        document.getElementById('fldSuccess').value,
+    warning_color:        document.getElementById('fldWarning').value,
+    danger_color:         document.getElementById('fldDanger').value,
+    background_color:     document.getElementById('fldBg').value,
+    card_bg_color:        document.getElementById('fldCardBg').value,
+    table_header_color:   document.getElementById('fldTableHdr').value,
+    text_primary_color:   document.getElementById('fldTextPrimary').value,
+    text_secondary_color: document.getElementById('fldTextSecondary').value,
+  };
+
+  const res = await fetch(`/api/admin/branding/${_profileId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (res.ok) {
+    const updated = await res.json();
+    // Atualiza lista local
+    const idx = _profileList.findIndex(p => p.id === _profileId);
+    if (idx >= 0) _profileList[idx] = updated;
+    _profileData = updated;
+    showToast('Identidade visual salva com sucesso!');
+  } else {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || 'Erro ao salvar.', false);
+  }
+});
+
+// ── Restaurar HelloIT ────────────────────────────────────────────────────
+document.getElementById('btnRestoreBase').addEventListener('click', () => {
+  new bootstrap.Modal(document.getElementById('modalRestoreConfirm')).show();
+});
+
+document.getElementById('btnConfirmRestore').addEventListener('click', async () => {
+  bootstrap.Modal.getInstance(document.getElementById('modalRestoreConfirm')).hide();
+  const res = await fetch(`/api/admin/branding/${_profileId}/restore-base`, { method: 'POST' });
+  if (res.ok) {
+    const updated = await res.json();
+    const idx = _profileList.findIndex(p => p.id === _profileId);
+    if (idx >= 0) _profileList[idx] = updated;
+    _profileData = updated;
+    populateForm(updated);
+    updatePreview();
+    // Remove CSS variable overrides
+    Object.values(FIELD_TO_CSS).forEach(cssVar => document.documentElement.style.removeProperty(cssVar));
+    showToast('Padrão HelloIT restaurado.');
+  } else {
+    showToast('Erro ao restaurar.', false);
+  }
+});
+
+// ── Exportar JSON ─────────────────────────────────────────────────────────
+document.getElementById('btnExportJson').addEventListener('click', () => {
+  const exportData = { ...(_profileData) };
+  // Remove campos internos
+  delete exportData.id; delete exportData.client_id;
+  delete exportData.is_default; delete exportData.is_base;
+
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `branding_${exportData.name || 'perfil'}.json`.replace(/\s+/g, '_');
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ── Importar JSON ─────────────────────────────────────────────────────────
+document.getElementById('inputImportJson').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  try {
+    const data = JSON.parse(text);
+    // Aplica os campos no formulário e salva
+    const res = await fetch(`/api/admin/branding/${_profileId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      const idx = _profileList.findIndex(p => p.id === _profileId);
+      if (idx >= 0) _profileList[idx] = updated;
+      _profileData = updated;
+      populateForm(updated);
+      updatePreview();
+      showToast('Perfil importado com sucesso!');
+    } else {
+      showToast('Erro ao importar perfil.', false);
+    }
+  } catch(e) {
+    showToast('Arquivo JSON inválido.', false);
+  }
+  e.target.value = '';
+});
+
+// ── Novo perfil por cliente ───────────────────────────────────────────────
+document.getElementById('btnNewClientProfile').addEventListener('click', () => {
+  new bootstrap.Modal(document.getElementById('modalNewClientProfile')).show();
+});
+
+document.getElementById('btnConfirmNewProfile').addEventListener('click', async () => {
+  const clientId = document.getElementById('selNewClientId').value;
+  const name     = document.getElementById('fldNewProfileName').value.trim();
+  if (!clientId) { showToast('Selecione um cliente.', false); return; }
+  if (!name)     { showToast('Informe o nome do perfil.', false); return; }
+
+  const res = await fetch('/api/admin/branding', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: parseInt(clientId), name }),
+  });
+  if (res.ok) {
+    bootstrap.Modal.getInstance(document.getElementById('modalNewClientProfile')).hide();
+    await loadProfileList();
+    // Seleciona o novo perfil
+    const newProfile = await res.json();
+    document.getElementById('selProfile').value = newProfile.id;
+    onProfileChange();
+    showToast('Perfil criado!');
+  } else {
+    showToast('Erro ao criar perfil.', false);
+  }
+});
+
+// ── Excluir perfil ────────────────────────────────────────────────────────
+document.getElementById('btnDeleteProfile').addEventListener('click', async () => {
+  if (!confirm('Excluir este perfil? Esta ação não pode ser desfeita.')) return;
+  const res = await fetch(`/api/admin/branding/${_profileId}`, { method: 'DELETE' });
+  if (res.ok) {
+    await loadProfileList();
+    showToast('Perfil excluído.');
+  } else {
+    showToast('Erro ao excluir.', false);
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Política de Backup (PSI) — HelloIT{% endblock %}
+
+{% block content %}
+
+<!-- ── Page header ─────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-shield-check me-2"></i>Política de Backup (PSI)
+  </h2>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card mb-3 shadow-sm">
+  <div class="card-body py-2">
+    <p class="text-muted small mb-2">
+      Gera o documento de Política de Backup e Recuperação de Dados (Word) de uma rotina, com base na
+      configuração real coletada — inclui matriz de conformidade ISO 27001 / ISO 27040 / NIST CSF / CIS v8.
+    </p>
+
+    <div class="text-uppercase text-muted small fw-semibold mb-1">Identificação</div>
+    <div class="row g-2 align-items-end mb-2">
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Cliente / Ambiente</label>
+        <select class="form-select form-select-sm" id="selClient" style="min-width:190px">
+          <option value="">— Selecione —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="form-label small mb-0 fw-semibold">Rotinas de Backup (selecione uma ou mais)</label>
+          <span class="small">
+            <a href="#" id="lnkRoutineAll" class="link-primary text-decoration-none">Marcar todas</a>
+            <span class="text-muted">|</span>
+            <a href="#" id="lnkRoutineNone" class="link-primary text-decoration-none">Limpar</a>
+            <span class="text-muted ms-1" id="routineCount">0 selecionada(s)</span>
+          </span>
+        </div>
+        <div class="border rounded p-2" id="routineBox"
+             style="max-height:180px; overflow-y:auto; min-width:340px; background:var(--bs-body-bg,#fff)">
+          <div class="text-muted small" id="routinePlaceholder">Selecione um cliente para listar as rotinas.</div>
+        </div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Nome do Cliente (como aparecerá no documento)</label>
+        <input type="text" class="form-control form-control-sm" id="inpClientName"
+               placeholder="Ex.: Safilo Ltda" style="min-width:200px" required>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Classificação</label>
+        <select class="form-select form-select-sm" id="selTlp">
+          <option value="CLEAR">TLP:CLEAR</option>
+          <option value="GREEN">TLP:GREEN</option>
+          <option value="AMBER" selected>TLP:AMBER</option>
+          <option value="RED">TLP:RED</option>
+        </select>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="text-uppercase text-muted small fw-semibold mb-1">Parâmetros editoriais da política</div>
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">RTO acordado</label>
+        <input type="text" class="form-control form-control-sm" id="inpRto"
+               placeholder="Ex.: 8 horas úteis" value="Conforme contrato" style="min-width:170px">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">RPO acordado (vazio = derivar do agendamento da rotina)</label>
+        <input type="text" class="form-control form-control-sm" id="inpRpo"
+               placeholder="Ex.: 24 horas" style="min-width:200px">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Periodicidade dos testes de restauração</label>
+        <select class="form-select form-select-sm" id="selRestoreTest" style="min-width:160px">
+          <option value="Mensal">Mensal</option>
+          <option value="Trimestral" selected>Trimestral</option>
+          <option value="Semestral">Semestral</option>
+          <option value="Anual">Anual</option>
+          <option value="Sob demanda">Sob demanda</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Ciclo de revisão da política</label>
+        <select class="form-select form-select-sm" id="selReviewCycle" style="min-width:140px">
+          <option value="Anual" selected>Anual</option>
+          <option value="Semestral">Semestral</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Responsável do cliente (nome/área)</label>
+        <input type="text" class="form-control form-control-sm" id="inpResponsibleClient"
+               placeholder="Ex.: TI Corporativa" value="A designar pelo cliente" style="min-width:190px">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Versão do documento</label>
+        <input type="text" class="form-control form-control-sm" id="inpDocVersion"
+               value="1.0" style="width:90px">
+      </div>
+    </div>
+
+    <div class="row g-2 align-items-end mt-1">
+      <div class="col-12 col-md-8">
+        <label class="form-label small mb-1 fw-semibold">Retenção legal / observações LGPD (opcional)</label>
+        <textarea class="form-control form-control-sm" id="txtLegalRetention" rows="2"
+                  placeholder="Ex.: dados fiscais mantidos por 5 anos conforme legislação vigente"></textarea>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm" id="btnGenerate" disabled>
+          <i class="bi bi-file-earmark-word me-1"></i>Gerar Política (Word)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Hint ────────────────────────────────────────────────────────────────── -->
+<div id="hintBox" class="text-muted small">
+  <i class="bi bi-info-circle me-1"></i>
+  O documento Word traz: identificação da rotina, objetivos e escopo, configuração de proteção real
+  (retenção/imutabilidade/schedule), RTO/RPO acordados, plano de testes de restauração, papéis e
+  responsabilidades, e matriz de conformidade ISO 27001 / ISO 27040 / NIST CSF / CIS v8 — marcado com a
+  classificação TLP escolhida.
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+'use strict';
+
+const escHtml = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function checkFormValid() {
+  const clientId    = document.getElementById('selClient').value;
+  const routineChks = document.querySelectorAll('.routine-chk:checked');
+  const clientName  = document.getElementById('inpClientName').value.trim();
+
+  const countEl = document.getElementById('routineCount');
+  if (countEl) countEl.textContent = routineChks.length + ' selecionada(s)';
+
+  document.getElementById('btnGenerate').disabled =
+    !(clientId && routineChks.length > 0 && clientName);
+}
+
+async function loadRoutines() {
+  const clientId = document.getElementById('selClient').value;
+  const routineBox = document.getElementById('routineBox');
+
+  if (!clientId) {
+    routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Selecione um cliente para listar as rotinas.</div>';
+    checkFormValid();
+    return;
+  }
+
+  routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Carregando rotinas...</div>';
+
+  try {
+    const resp = await fetch('/api/client-report/routines?client_id=' + encodeURIComponent(clientId));
+    if (!resp.ok) {
+      routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Erro ao carregar rotinas.</div>';
+      checkFormValid();
+      return;
+    }
+    const data = await resp.json();
+    const items = data.items || [];
+    if (items.length === 0) {
+      routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Nenhuma rotina encontrada para este cliente.</div>';
+    } else {
+      routineBox.innerHTML = items.map(it =>
+        `<label class="d-block small"><input type="checkbox" class="form-check-input me-1 routine-chk" value="${escHtml(it.job_name)}"> ${escHtml(it.job_name)} <span class="text-muted">(${it.executions} execuções — última: ${escHtml(it.last_exec)})</span></label>`
+      ).join('');
+    }
+  } catch (err) {
+    console.error('loadRoutines error:', err);
+    routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Erro ao carregar rotinas.</div>';
+  } finally {
+    checkFormValid();
+  }
+}
+
+async function generate() {
+  const btn = document.getElementById('btnGenerate');
+  const originalHtml = btn.innerHTML;
+
+  const payload = {
+    client_id:          parseInt(document.getElementById('selClient').value, 10),
+    job_names:           Array.from(document.querySelectorAll('.routine-chk:checked')).map(c => c.value),
+    client_name:         document.getElementById('inpClientName').value.trim(),
+    tlp:                 document.getElementById('selTlp').value,
+    rto:                 document.getElementById('inpRto').value.trim(),
+    rpo:                 document.getElementById('inpRpo').value.trim(),
+    restore_test_freq:   document.getElementById('selRestoreTest').value,
+    review_cycle:        document.getElementById('selReviewCycle').value,
+    responsible_client:  document.getElementById('inpResponsibleClient').value.trim(),
+    legal_retention:     document.getElementById('txtLegalRetention').value.trim(),
+    doc_version:         document.getElementById('inpDocVersion').value.trim(),
+  };
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gerando...';
+
+  try {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const resp = await fetch('/api/export/backup-policy-docx', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try {
+        const errJson = await resp.json();
+        detail = errJson.detail || detail;
+      } catch (e) {
+        const text = await resp.text().catch(() => '');
+        detail = text || detail;
+      }
+      alert('Erro ao gerar Word: ' + detail);
+      return;
+    }
+
+    const blob = await resp.blob();
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : 'Politica_Backup.docx';
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Erro inesperado: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    checkFormValid();
+  }
+}
+
+document.getElementById('selClient').addEventListener('change', loadRoutines);
+['inpClientName'].forEach(id => {
+  document.getElementById(id).addEventListener('input', checkFormValid);
+  document.getElementById(id).addEventListener('change', checkFormValid);
+});
+document.getElementById('routineBox').addEventListener('change', (e) => {
+  if (e.target && e.target.classList.contains('routine-chk')) checkFormValid();
+});
+document.getElementById('lnkRoutineAll').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.routine-chk').forEach(c => { c.checked = true; });
+  checkFormValid();
+});
+document.getElementById('lnkRoutineNone').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.routine-chk').forEach(c => { c.checked = false; });
+  checkFormValid();
+});
+document.getElementById('btnGenerate').addEventListener('click', generate);
+
+checkFormValid();
+</script>
+{% endblock %}

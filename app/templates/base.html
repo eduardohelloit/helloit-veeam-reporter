@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ request.session.get('csrf_token', '') }}">
+  <script>
+  /* CSRF: injeta X-CSRF-Token em toda requisição fetch mutável same-origin */
+  (function () {
+    var meta  = document.querySelector('meta[name="csrf-token"]');
+    var token = meta ? meta.getAttribute('content') : '';
+    if (!token || !window.fetch) return;
+    var orig = window.fetch;
+    window.fetch = function (input, init) {
+      init = init || {};
+      var method = (init.method || (input && input.method) || 'GET').toUpperCase();
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].indexOf(method) !== -1) {
+        var url = (typeof input === 'string') ? input : (input && input.url) || '';
+        var sameOrigin = url.indexOf('/') === 0 || url.indexOf(window.location.origin) === 0;
+        if (sameOrigin) {
+          var h = new Headers(init.headers || (typeof input === 'object' && input.headers) || {});
+          if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', token);
+          init.headers = h;
+        }
+      }
+      return orig(input, init);
+    };
+  })();
+  </script>
+  <title>{% block title %}Veeam Reporter{% endblock %} — HelloIT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/branding.css">
+  <link rel="icon" type="image/svg+xml" href="/static/brand/favicon.svg">
+</head>
+<body>
+
+{# ── Branding ────────────────────────────────────────────────────────────── #}
+{% set _b = get_branding() %}
+
+{# ── URL atual ───────────────────────────────────────────────────────────── #}
+{% set _cur = request.url.path %}
+
+{# ── Breadcrumb map: path → [módulo, página] ─────────────────────────────── #}
+{% set _bc_map = {
+  '/dashboard':              ['Relatórios',      'Visão Geral'],
+  '/dashboard/admin':        ['Relatórios',      'Status das Rotinas'],
+  '/dashboard/rotina':       ['Relatórios',      'Detalhe da Rotina'],
+  '/dashboard/weekly':       ['Relatórios',      'Relatório Semanal'],
+  '/dashboard/monthly-ps':   ['Relatórios',      'Relatório Mensal (PowerShell)'],
+  '/dashboard/client-report': ['Relatórios',      'Relatório de Cliente'],
+  '/dashboard/backup-policy': ['Relatórios',      'Política de Backup (PSI)'],
+  '/dashboard/monthly':      ['Relatórios',      'Relatório Mensal'],
+  '/dashboard/incidents':    ['Relatórios',      'Incidentes e Ofensores'],
+  '/reports':                ['Relatórios',      'Relatórios Gerados'],
+  '/review':                 ['Relatórios',      'Revisão de Relatório'],
+  '/dashboard/offload':      ['Relatórios',      'Relatório Offload'],
+  '/dashboard/backups':      ['Relatórios',      'Relatório Backup'],
+  '/dashboard/protection':   ['Proteção',        'Proteção de VMs'],
+  '/dashboard/rpo':          ['Proteção',        'RPO Observado'],
+  '/dashboard/audit':        ['Auditoria',       'Auditoria de Jobs'],
+  '/analytics/offload':      ['Análises',        'Offload Analítico'],
+  '/analytics/backups':      ['Análises',        'Backups (Performance)'],
+  '/analytics/vm-missing':   ['Análises',        'VMs Não Localizadas'],
+  '/analytics/job-config':   ['Análises',        'Config Rotinas'],
+  '/analytics/disk':         ['Análises',        'Backups em Disco'],
+  '/analytics/disk-growth':  ['Análises',        'Crescimento de Fulls'],
+  '/analytics/block-cloning':['Análises',        'Block Cloning'],
+  '/analytics/environment':  ['Análises',        'Consumo por Ambiente'],
+  '/environment/classify':   ['Operação',        'Classificação de Ambiente'],
+  '/import/powershell':      ['Operação',        'Importar PowerShell'],
+  '/import/history':         ['Operação',        'Histórico de Importações'],
+  '/disk/import':            ['Operação',        'Importar Disco'],
+  '/disk/history':           ['Operação',        'Histórico Disco'],
+  '/analytics/duplicates':   ['Análises',        'Servidores Duplicados'],
+  '/import':                 ['Operação',        'Importar Event Viewer'],
+  '/offload/import':         ['Operação',        'Importar Offload'],
+  '/offload/history':        ['Operação',        'Histórico Offload'],
+  '/backups/import':         ['Operação',        'Importar Backups'],
+  '/backups/history':        ['Operação',        'Histórico Backups'],
+  '/job-config/import':      ['Operação',        'Importar Config Rotinas'],
+  '/job-config/history':     ['Operação',        'Histórico Config'],
+  '/history':                ['Operação',        'Histórico de Cargas'],
+  '/clients':                ['Operação',        'Clientes'],
+  '/admin/users':            ['Administração',   'Usuários'],
+  '/admin/password-policy':  ['Administração',   'Política de Senha'],
+  '/admin/security-log':     ['Administração',   'Logs de Segurança'],
+  '/admin/reprocess':        ['Administração',   'Reprocessar Eventos'],
+  '/admin/audit-diagnostic': ['Administração',   'Diagnóstico Auditoria'],
+  '/admin/branding':         ['Administração',   'Identidade Visual'],
+  '/admin/offenders':        ['Administração',   'Regras de Ofensores'],
+  '/admin/rpo-policies':     ['Administração',   'Políticas de RPO'],
+} %}
+
+{# ── Breadcrumb ativo ────────────────────────────────────────────────────── #}
+{% set _ns = namespace(bc=[]) %}
+{% for path, bc in _bc_map.items() %}
+  {% if _ns.bc | length == 0 %}
+    {% if _cur == path or (_cur.startswith(path ~ '/') and path != '/') %}
+      {% set _ns.bc = bc %}
+    {% endif %}
+  {% endif %}
+{% endfor %}
+{% set _bc = _ns.bc %}
+
+{# ── Fonte de dados (coletor) de cada tela ───────────────────────────────── #}
+{% set EV   = 'Event Viewer' %}
+{% set DISK = 'PS · Backups em disco' %}
+{% set CAP  = 'PS · Capacidade do repo' %}
+{% set CFG  = 'PS · Config de rotinas' %}
+{% set PERF = 'PS · Performance de backup' %}
+{% set OFF  = 'PS · Offload / SOBR' %}
+{% set _src_help = {
+  EV:   'Importação do Event Viewer (.evtx / CSV)',
+  DISK: 'Coletor collect_disk_backups.ps1 (Backups em Disco)',
+  CAP:  'Coletor collect_repo_capacity.ps1 (capacidade dos extents)',
+  CFG:  'Coletor collect_job_config.ps1 (auditoria de configuração)',
+  PERF: 'Coletor collect_backups.ps1 (performance de backup)',
+  OFF:  'Coletor de offload / SOBR.ps1 (capacity tier)',
+} %}
+{% set _src_map = {
+  '/dashboard':               [EV],
+  '/dashboard/admin':         [EV],
+  '/dashboard/rotina':        [EV],
+  '/dashboard/weekly':        [EV],
+  '/dashboard/monthly':       [EV],
+  '/dashboard/client-report': [EV],
+  '/dashboard/incidents':     [EV],
+  '/dashboard/protection':    [EV],
+  '/dashboard/rpo':           [EV],
+  '/dashboard/audit':         [EV],
+  '/analytics/duplicates':    [EV],
+  '/dashboard/monthly-ps':    [PERF, DISK],
+  '/dashboard/backup-policy': [CFG],
+  '/dashboard/backups':       [PERF],
+  '/dashboard/offload':       [OFF],
+  '/analytics/backups':       [PERF],
+  '/analytics/vm-missing':    [PERF],
+  '/analytics/offload':       [OFF],
+  '/analytics/job-config':    [CFG],
+  '/analytics/disk':          [DISK, CAP],
+  '/analytics/disk-growth':   [DISK],
+  '/analytics/block-cloning': [DISK],
+  '/analytics/environment':   [DISK, CAP],
+  '/environment/classify':    [DISK, CAP],
+} %}
+{# match mais específico (maior prefixo), independente da ordem #}
+{% set _sns = namespace(src=[], best=-1) %}
+{% for path, src in _src_map.items() %}
+  {% if (_cur == path or (_cur.startswith(path ~ '/') and path != '/')) and (path | length) > _sns.best %}
+    {% set _sns.src = src %}
+    {% set _sns.best = path | length %}
+  {% endif %}
+{% endfor %}
+{% set _src = _sns.src %}
+
+{# ── Seções ativas (para auto-expandir o módulo correto) ─────────────────── #}
+{% set _sa = namespace(
+  op    = (_cur.startswith('/import') or _cur == '/history' or _cur.startswith('/history') or _cur == '/clients' or _cur.startswith('/clients') or _cur.startswith('/offload') or _cur.startswith('/backups')),
+  rep   = (_cur == '/dashboard' or _cur.startswith('/dashboard/admin') or _cur.startswith('/dashboard/rotina') or _cur.startswith('/dashboard/weekly') or _cur.startswith('/dashboard/monthly') or _cur.startswith('/dashboard/offload') or _cur.startswith('/dashboard/backups') or _cur.startswith('/dashboard/incidents') or _cur == '/reports' or _cur.startswith('/reports') or _cur.startswith('/review')),
+  prot  = (_cur.startswith('/dashboard/protection') or _cur.startswith('/dashboard/rpo')),
+  audit = (_cur.startswith('/dashboard/audit')),
+  ana   = (_cur.startswith('/analytics')),
+  adm   = (_cur.startswith('/admin'))
+) %}
+
+{# ── Macro: item da sidebar ──────────────────────────────────────────────── #}
+{# exact=true → só ativa no match exato (evita /dashboard ativar /dashboard/admin) #}
+{% macro sb_item(url, icon, label, exact=false) %}
+{% if exact %}
+  {% set _active = (_cur == url) %}
+{% else %}
+  {% set _active = (_cur == url) or (_cur.startswith(url ~ '/') and url != '/') %}
+{% endif %}
+<a href="{{ url }}" class="sb-item{% if _active %} active{% endif %}" title="{{ label }}">
+  <i class="bi {{ icon }}"></i>
+  <span class="sb-item-text">{{ label }}</span>
+</a>
+{% endmacro %}
+
+{# ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT
+   ═══════════════════════════════════════════════════════════════════════ #}
+
+<!-- Mobile overlay -->
+<div class="sb-overlay" id="sbOverlay"></div>
+
+<div class="app-layout">
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       SIDEBAR
+       ════════════════════════════════════════════════════════════════ -->
+  <aside class="app-sidebar" id="appSidebar">
+
+    <!-- Logo / nome do sistema -->
+    <div class="sb-header">
+      {% if _b.get('logo_main_path') %}
+      <img src="/branding/file/{{ _b['logo_main_path'] }}"
+           alt="{{ _b['company_name'] }}" class="sb-logo-img">
+      {% elif _b['company_name'] == 'HelloIT' %}
+      <img src="/static/brand/logo-helloit.svg" alt="HelloIT" style="height:30px;flex-shrink:0">
+      {% else %}
+      <div class="sb-wordmark flex-shrink-0">
+        {{ _b.get('short_name') or _b['company_name'].split()[0] }}<span class="sb-wordmark-dot">.</span>
+      </div>
+      {% endif %}
+      <div class="sb-header-text">
+        <div class="sb-sub">{{ _b['system_name'] }}</div>
+      </div>
+    </div>
+
+    <!-- Navegação modular -->
+    <nav class="sb-nav" id="sbNav">
+
+      {# ── Operação ──────────────────────────────────────────────────── #}
+      <div class="sb-section" id="sbs-operacao">
+        <button class="sb-section-toggle" type="button" data-section="operacao" title="Operação">
+          <i class="bi bi-box-seam sb-sec-icon"></i>
+          <span class="sb-sec-label">Operação</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {# Event Viewer (.evtx) #}
+          {% if request.state.is_admin %}
+          {{ sb_item('/import',         'bi-cloud-upload',    'Importar Event Viewer') }}
+          {% endif %}
+          {{ sb_item('/history',        'bi-clock-history',   'Histórico Eventos') }}
+          {# Coletados via PowerShell #}
+          {% if request.state.is_admin %}
+          <div class="sb-group-label"><i class="bi bi-terminal me-1"></i>PowerShell</div>
+          {{ sb_item('/import/powershell', 'bi-cloud-arrow-up',    'Importar PowerShell') }}
+          {{ sb_item('/import/history',    'bi-clock-history',     'Histórico de Importações') }}
+          {{ sb_item('/environment/classify', 'bi-tags',           'Classificação de Ambiente') }}
+          {% endif %}
+          <div class="sb-group-label"><i class="bi bi-building me-1"></i>Cadastros</div>
+          {{ sb_item('/clients', 'bi-building',      'Clientes') }}
+        </div></div>
+      </div>
+
+      {# ── Relatórios ────────────────────────────────────────────────── #}
+      <div class="sb-section" id="sbs-relatorios">
+        <button class="sb-section-toggle" type="button" data-section="relatorios" title="Relatórios">
+          <i class="bi bi-bar-chart-line sb-sec-icon"></i>
+          <span class="sb-sec-label">Relatórios</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {# ── Event Viewer (.evtx) ── #}
+          <div class="sb-group-label"><i class="bi bi-window me-1"></i>Event Viewer</div>
+          {{ sb_item('/dashboard',            'bi-speedometer2',           'Visão Geral',           true) }}
+          {{ sb_item('/dashboard/admin',      'bi-shield-check',           'Status das Rotinas') }}
+          {{ sb_item('/dashboard/rotina',     'bi-clipboard-data',         'Detalhe da Rotina') }}
+          {{ sb_item('/dashboard/weekly',     'bi-calendar-week',          'Relatório Semanal') }}
+          {{ sb_item('/dashboard/monthly',    'bi-calendar-month',         'Relatório Mensal') }}
+          {{ sb_item('/dashboard/incidents',  'bi-exclamation-triangle',   'Incidentes e Ofensores') }}
+          {{ sb_item('/reports',              'bi-file-earmark-bar-graph', 'Relatórios Gerados') }}
+          {# ── PowerShell ── #}
+          <div class="sb-group-label"><i class="bi bi-terminal me-1"></i>PowerShell</div>
+          {{ sb_item('/dashboard/monthly-ps', 'bi-calendar-month', 'Relatório Mensal') }}
+          {{ sb_item('/dashboard/client-report', 'bi-file-earmark-word', 'Relatório de Cliente') }}
+          {{ sb_item('/dashboard/backup-policy', 'bi-shield-check', 'Política de Backup (PSI)') }}
+          {{ sb_item('/dashboard/offload',    'bi-cloud-haze2',  'Relatório Offload') }}
+          {{ sb_item('/dashboard/backups',    'bi-hdd-stack',    'Relatório Backup') }}
+        </div></div>
+      </div>
+
+      {# ── Proteção ──────────────────────────────────────────────────── #}
+      <div class="sb-section" id="sbs-protecao">
+        <button class="sb-section-toggle" type="button" data-section="protecao" title="Proteção">
+          <i class="bi bi-shield-fill-check sb-sec-icon"></i>
+          <span class="sb-sec-label">Proteção</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {{ sb_item('/dashboard/protection', 'bi-hdd-network',   'Proteção de VMs') }}
+          {{ sb_item('/dashboard/rpo',        'bi-clock-history', 'RPO Observado') }}
+        </div></div>
+      </div>
+
+      {# ── Auditoria ─────────────────────────────────────────────────── #}
+      <div class="sb-section" id="sbs-auditoria">
+        <button class="sb-section-toggle" type="button" data-section="auditoria" title="Auditoria">
+          <i class="bi bi-search sb-sec-icon"></i>
+          <span class="sb-sec-label">Auditoria</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {{ sb_item('/dashboard/audit', 'bi-pencil-square', 'Auditoria de Jobs') }}
+        </div></div>
+      </div>
+
+      {# ── Análises ──────────────────────────────────────────────────── #}
+      <div class="sb-section" id="sbs-analises">
+        <button class="sb-section-toggle" type="button" data-section="analises" title="Análises">
+          <i class="bi bi-search-heart sb-sec-icon"></i>
+          <span class="sb-sec-label">Análises</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {# Event Viewer (.evtx) #}
+          <div class="sb-group-label"><i class="bi bi-window me-1"></i>Event Viewer</div>
+          {{ sb_item('/analytics/duplicates',  'bi-files',              'Servidores Duplicados') }}
+          {# Coletados via PowerShell #}
+          <div class="sb-group-label"><i class="bi bi-terminal me-1"></i>PowerShell</div>
+          {{ sb_item('/analytics/offload',     'bi-hdd-rack',           'Offload Analítico') }}
+          {{ sb_item('/analytics/backups',     'bi-hdd-stack',          'Backups (Performance)') }}
+          {{ sb_item('/analytics/vm-missing',  'bi-question-octagon',   'VMs Não Localizadas') }}
+          {{ sb_item('/analytics/job-config',  'bi-gear-wide-connected','Config Rotinas') }}
+          {{ sb_item('/analytics/disk',        'bi-hdd',                'Backups em Disco') }}
+          {{ sb_item('/analytics/disk-growth', 'bi-graph-up-arrow',     'Crescimento de Fulls') }}
+          {{ sb_item('/analytics/block-cloning','bi-diagram-3',          'Block Cloning') }}
+          {{ sb_item('/analytics/environment', 'bi-pie-chart',          'Consumo por Ambiente') }}
+        </div></div>
+      </div>
+
+      {# ── Administração (admin only) ────────────────────────────────── #}
+      {% if request.state.is_admin %}
+      <div class="sb-section" id="sbs-administracao">
+        <button class="sb-section-toggle" type="button" data-section="administracao" title="Administração">
+          <i class="bi bi-gear-fill sb-sec-icon"></i>
+          <span class="sb-sec-label">Administração</span>
+          <i class="bi bi-chevron-down sb-sec-chevron"></i>
+        </button>
+        <div class="sb-section-items"><div>
+          {{ sb_item('/admin/users',           'bi-people',         'Usuários') }}
+          {{ sb_item('/admin/password-policy', 'bi-key',            'Política de Senha') }}
+          {{ sb_item('/admin/branding',        'bi-palette',        'Identidade Visual') }}
+          {{ sb_item('/admin/rpo-policies',    'bi-stopwatch',      'Políticas de RPO') }}
+          {{ sb_item('/admin/offenders',       'bi-tags',           'Regras de Ofensores') }}
+          {{ sb_item('/admin/security-log',    'bi-journal-text',   'Logs de Segurança') }}
+          {{ sb_item('/admin/reprocess',       'bi-arrow-repeat',   'Reprocessar Eventos') }}
+        </div></div>
+      </div>
+      {% endif %}
+
+    </nav><!-- /sb-nav -->
+
+  </aside><!-- /app-sidebar -->
+
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       MAIN AREA
+       ════════════════════════════════════════════════════════════════ -->
+  <div class="app-main" id="appMain">
+
+    <!-- ── Topbar ──────────────────────────────────────────────────── -->
+    <div class="app-topbar">
+
+      <!-- Toggle sidebar -->
+      <button class="sb-toggle-btn" id="sbToggle" aria-label="Alternar menu">
+        <i class="bi bi-list fs-5"></i>
+      </button>
+
+      <!-- Breadcrumb -->
+      <div class="topbar-breadcrumb d-none d-sm-flex">
+        {% block breadcrumb %}
+        {% if _bc | length >= 2 %}
+        <span class="bc-module">{{ _bc[0] }}</span>
+        <span class="bc-sep"><i class="bi bi-chevron-right"></i></span>
+        <span class="bc-page">{{ _bc[1] }}</span>
+        {% elif _bc | length == 1 %}
+        <span class="bc-page">{{ _bc[0] }}</span>
+        {% else %}
+        <span class="bc-page">{{ _b['system_name'] }}</span>
+        {% endif %}
+        {% endblock %}
+      </div>
+
+      {# ── Fonte de dados desta tela (coletor de que depende) ─────────────── #}
+      {% if _src %}
+      <div class="topbar-source d-none d-md-flex align-items-center gap-1"
+           title="Esta tela depende deste(s) coletor(es) para ter dados atualizados">
+        <i class="bi bi-database-gear text-muted"></i>
+        <span class="text-muted small me-1">Fonte:</span>
+        {% for s in _src %}
+        <span class="badge rounded-pill border text-secondary"
+              style="background:var(--bs-tertiary-bg,#f1f3f5);font-weight:500"
+              title="{{ _src_help.get(s, s) }}">{{ s }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="topbar-spacer"></div>
+
+      <!-- Usuário logado -->
+      <div class="topbar-user">
+        <div class="dropdown">
+          <button class="btn btn-sm btn-light d-flex align-items-center gap-2 border"
+                  type="button" data-bs-toggle="dropdown"
+                  style="font-size:.82rem;padding:.3rem .7rem">
+            <i class="bi bi-person-circle text-muted"></i>
+            <span class="d-none d-sm-inline">{{ request.state.username }}</span>
+            {% if request.state.is_admin %}
+            <span class="badge bg-warning text-dark d-none d-md-inline"
+                  style="font-size:.6rem;padding:.2em .45em">Admin</span>
+            {% endif %}
+            <i class="bi bi-chevron-down" style="font-size:.65rem;opacity:.6"></i>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end shadow-sm"
+              style="min-width:200px;font-size:.84rem">
+            <li><span class="dropdown-item-text small text-muted py-1">
+              <i class="bi bi-person me-1"></i>{{ request.state.username }}
+              {% if request.state.is_admin %}
+              <span class="badge bg-warning text-dark ms-1" style="font-size:.60rem">Admin</span>
+              {% endif %}
+            </span></li>
+            <li><hr class="dropdown-divider my-1"></li>
+            <li>
+              <a class="dropdown-item py-1" href="/auth/change-password">
+                <i class="bi bi-key me-2 text-muted"></i>Alterar Senha
+              </a>
+            </li>
+            <li><hr class="dropdown-divider my-1"></li>
+            <li>
+              <a class="dropdown-item py-1 text-danger" href="/logout">
+                <i class="bi bi-box-arrow-right me-2"></i>Sair
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div><!-- /app-topbar -->
+
+    <!-- ── Conteúdo da página ─────────────────────────────────────── -->
+    <main class="app-content">
+      {% block content %}{% endblock %}
+    </main>
+
+  </div><!-- /app-main -->
+
+</div><!-- /app-layout -->
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+(function () {
+  const sidebar = document.getElementById('appSidebar');
+  const main    = document.getElementById('appMain');
+  const overlay = document.getElementById('sbOverlay');
+  const toggle  = document.getElementById('sbToggle');
+
+  function isMobile() { return window.innerWidth < 992; }
+
+  /* ── Restaurar estado collapsed (desktop) ─────────────────────────── */
+  if (!isMobile() && localStorage.getItem('sbCollapsed') === '1') {
+    sidebar.classList.add('sb-collapsed');
+    main.classList.add('sb-collapsed');
+  }
+
+  /* ── Toggle sidebar ──────────────────────────────────────────────── */
+  toggle.addEventListener('click', function () {
+    if (isMobile()) {
+      const open = sidebar.classList.contains('sb-show');
+      sidebar.classList.toggle('sb-show', !open);
+      overlay.classList.toggle('active',  !open);
+    } else {
+      const collapsed = sidebar.classList.toggle('sb-collapsed');
+      main.classList.toggle('sb-collapsed', collapsed);
+      localStorage.setItem('sbCollapsed', collapsed ? '1' : '0');
+    }
+  });
+
+  overlay.addEventListener('click', function () {
+    sidebar.classList.remove('sb-show');
+    overlay.classList.remove('active');
+  });
+
+  document.querySelectorAll('.sb-item').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (isMobile()) {
+        sidebar.classList.remove('sb-show');
+        overlay.classList.remove('active');
+      }
+    });
+  });
+
+  window.addEventListener('resize', function () {
+    if (!isMobile()) {
+      sidebar.classList.remove('sb-show');
+      overlay.classList.remove('active');
+    }
+  });
+
+  /* ── Accordion de seções ─────────────────────────────────────────── */
+  document.querySelectorAll('.sb-section-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const id      = this.dataset.section;
+      const section = document.getElementById('sbs-' + id);
+      if (!section) return;
+      const wasOpen = section.classList.contains('open');
+      section.classList.toggle('open', !wasOpen);
+      try { localStorage.setItem('sbsec_' + id, wasOpen ? '0' : '1'); } catch (e) {}
+    });
+  });
+
+  /* ── Estado das seções: TODAS recolhidas por padrão (no login) ────────
+     Só abre o que o usuário abriu manualmente antes (localStorage='1').
+     Resolve o overflow do menu em 1080p (nada de seção aberta empurrando itens
+     para fora da tela; e o .sb-nav rola quando precisa). */
+  ['operacao', 'relatorios', 'protecao', 'auditoria', 'analises', 'administracao'].forEach(function (id) {
+    const section = document.getElementById('sbs-' + id);
+    if (!section) return;
+    if (localStorage.getItem('sbsec_' + id) === '1') section.classList.add('open');
+    else section.classList.remove('open');
+  });
+
+})();
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

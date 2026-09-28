@@ -1,0 +1,531 @@
+{% extends "base.html" %}
+{% block title %}Backups em Disco — Veeam Reporter{% endblock %}
+
+{% block content %}
+{% set immut_labels = {
+  'expirado': 'Já expirado',
+  'ate_7d':   'Vence em 7 dias',
+  'ate_30d':  '8–30 dias',
+  'ate_60d':  '31–60 dias',
+  'ate_90d':  '61–90 dias',
+  'mais_90d': 'Mais de 90 dias',
+} %}
+
+{# ── Mini-tabela reutilizável para Capacity / Archive / Standalone ────────── #}
+{% macro tier_table(rows, label, icon) %}
+<div class="mb-4">
+  <div class="fw-semibold small mb-2">
+    <i class="bi {{ icon }} me-1 text-muted"></i>{{ label }}
+  </div>
+  {% if rows %}
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Repositório</th>
+          <th>Tipo</th>
+          <th>Total</th>
+          <th>Livre</th>
+          <th>Usado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in rows %}
+        <tr>
+          <td>
+            {{ e.name or '—' }}
+            {% if e.path %}<div class="text-muted" style="font-size:.7rem">{{ e.path }}</div>{% endif %}
+          </td>
+          <td class="text-muted small">{{ e.repo_type or '—' }}</td>
+          <td>{{ e.total | fmt_bytes }}</td>
+          <td>{{ e.free | fmt_bytes }}</td>
+          <td>{{ e.used | fmt_bytes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted small mb-0">Sem repositórios nesta camada.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-hdd" style="color:var(--brand-primary)"></i>
+      Backups em Disco
+    </h4>
+    <p class="text-muted small mb-0">
+      Consumo de espaço, vencimento de imutabilidade e distribuição por VM/rotina.
+    </p>
+  </div>
+</div>
+
+<!-- ═══ SELETORES ══════════════════════════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <form method="get" action="/analytics/disk" class="d-flex align-items-end flex-wrap gap-2">
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+        <select name="client_id" class="form-select form-select-sm" style="min-width:240px"
+                onchange="this.form.submit()">
+          <option value="">Selecione o cliente...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if data.has_data %}
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Rotina</label>
+        <select name="job" class="form-select form-select-sm" style="min-width:240px"
+                onchange="this.form.submit()">
+          <option value="">Todas as rotinas</option>
+          {% for j in data.jobs %}
+          <option value="{{ j }}" {% if data.job == j %}selected{% endif %}>{{ j }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Imutabilidade expira</label>
+        <input type="date" name="expira_ate" value="{{ data.expira_ate or '' }}"
+               class="form-control form-control-sm" style="min-width:170px"
+               onchange="this.form.submit()">
+      </div>
+      <div>
+        <label class="form-label form-label-sm mb-1 small text-muted">Mostrar</label>
+        <div class="btn-group btn-group-sm d-flex" role="group">
+          <input type="radio" class="btn-check" name="modo" id="modoDia" value="dia"
+                 {% if data.expira_modo != 'ate' %}checked{% endif %}
+                 onchange="this.form.submit()">
+          <label class="btn btn-outline-primary" for="modoDia" title="Só o que vence exatamente na data">No dia</label>
+          <input type="radio" class="btn-check" name="modo" id="modoAte" value="ate"
+                 {% if data.expira_modo == 'ate' %}checked{% endif %}
+                 onchange="this.form.submit()">
+          <label class="btn btn-outline-primary" for="modoAte" title="Tudo liberável até a data (acumulado)">Acumulado até</label>
+        </div>
+      </div>
+      <div class="ms-auto text-end">
+        <div class="small text-muted">
+          <i class="bi bi-calendar-range me-1"></i>Coletado: {{ data.collected_range }}
+        </div>
+        <div class="small text-muted">
+          <i class="bi bi-cloud-arrow-down me-1"></i>Importado em {{ data.imported_at }}
+        </div>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+{% if not data.has_data %}
+<!-- ═══ ESTADO VAZIO ═══════════════════════════════════════════════════════ -->
+<div class="card shadow-sm">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-hdd display-4 text-muted mb-3 d-block"></i>
+    <p class="fw-semibold mb-1">Selecione um cliente com dados importados</p>
+    <p class="text-muted small mb-3">
+      Nenhuma carga de "Backups em Disco" concluída foi encontrada para este cliente.
+    </p>
+    <a href="/disk/import" class="btn btn-primary btn-sm">
+      <i class="bi bi-upload me-1"></i>Importar Backups em Disco
+    </a>
+  </div>
+</div>
+
+{% else %}
+
+<!-- ═══ 1. PERFORMANCE TIER ════════════════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-hdd-rack me-1"></i>Espaço no Performance Tier
+    </span>
+  </div>
+  <div class="card-body">
+    {% if data.performance %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Repositório</th>
+            <th>Tipo</th>
+            <th>SOBR</th>
+            <th>Total</th>
+            <th>Livre</th>
+            <th>Usado</th>
+            <th style="min-width:200px">% Utilização</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in data.performance %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ e.name or '—' }}</div>
+              {% if e.path %}<div class="text-muted" style="font-size:.72rem">{{ e.path }}</div>{% endif %}
+            </td>
+            <td class="text-muted small">{{ e.repo_type or '—' }}</td>
+            <td class="text-muted small">{{ e.sobr or '—' }}</td>
+            <td>{{ e.total | fmt_bytes }}</td>
+            <td>{{ e.free | fmt_bytes }}</td>
+            <td>{{ e.used | fmt_bytes }}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1" style="height:10px;min-width:80px">
+                  <div class="progress-bar {% if e.alert %}bg-danger{% endif %}" role="progressbar"
+                       style="width:{{ e.pct or 0 }}%"></div>
+                </div>
+                <span class="small {% if e.alert %}text-danger fw-semibold{% endif %}" style="min-width:2.4em">
+                  {% if e.pct is not none %}{{ e.pct }}%{% else %}—{% endif %}
+                </span>
+                {% if e.alert %}<span class="badge bg-danger">CHEIO</span>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="table-secondary fw-semibold">
+            <td colspan="3">TOTAL</td>
+            <td>{{ data.perf_total | fmt_bytes }}</td>
+            <td>{{ data.perf_free | fmt_bytes }}</td>
+            <td>{{ data.perf_used | fmt_bytes }}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <div class="progress flex-grow-1" style="height:10px;min-width:80px">
+                  <div class="progress-bar {% if data.perf_pct is not none and data.perf_pct >= 90 %}bg-danger{% endif %}"
+                       role="progressbar" style="width:{{ data.perf_pct or 0 }}%"></div>
+                </div>
+                <span class="small" style="min-width:2.4em">
+                  {% if data.perf_pct is not none %}{{ data.perf_pct }}%{% else %}—{% endif %}
+                </span>
+              </div>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">Nenhum extent de Performance Tier encontrado nesta carga.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ═══ 2. CAPACITY / ARCHIVE / STANDALONE ═════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-hdd-network me-1"></i>Capacity Tier / Archive / Standalone
+    </span>
+  </div>
+  <div class="card-body">
+    {{ tier_table(data.capacity,   'Capacity Tier', 'bi-cloud') }}
+    {{ tier_table(data.archive,    'Archive Tier',  'bi-archive') }}
+    {{ tier_table(data.standalone, 'Standalone',    'bi-hdd-stack') }}
+    <p class="text-muted small mb-0">
+      <i class="bi bi-info-circle me-1"></i>
+      Object storage é elástico (sem capacidade fixa) — por isso muitos repositórios de
+      Capacity/Archive aparecem sem total/livre definidos.
+    </p>
+  </div>
+</div>
+
+<!-- ═══ 3. CALIBRAÇÃO ══════════════════════════════════════════════════════ -->
+<div class="alert {% if data.calib %}alert-info{% else %}alert-warning{% endif %} mb-4">
+  <div class="d-flex align-items-start gap-2">
+    <i class="bi bi-rulers fs-5 mt-1"></i>
+    <div>
+      <div class="fw-semibold">
+        Lógico total: {{ data.logical | fmt_bytes }}
+        {% if data.calib %}
+        — Real (fator {{ '%.2f' | format(data.calib) }}x): {{ data.real | fmt_bytes }}
+        {% endif %}
+      </div>
+      {% if data.calib %}
+      <div class="small text-muted mt-1">
+        Os tamanhos lógicos (<code>BackupSize</code>) reportados pelo Veeam inflam por causa do
+        block cloning do sistema de arquivos do repositório — o mesmo bloco físico é contado em
+        múltiplos pontos de restauração. Aplicamos o fator de calibração
+        (lógico ÷ real, medido pela capacidade real do repositório) para estimar o consumo
+        físico por VM/rotina.
+      </div>
+      {% else %}
+      <div class="small mt-1">
+        Fator de calibração indisponível — envie também o arquivo de capacidade
+        (<code>collect_repo_capacity.ps1</code>) para calcular o tamanho real (não apenas lógico).
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 4. VENCIMENTO DE IMUTABILIDADE ═════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-shield-lock me-1"></i>Vencimento de Imutabilidade
+    </span>
+    <span class="text-muted small ms-1">— o que pode migrar para Capacity Tier</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Faixa</th>
+            <th>Lógico</th>
+            <th>Real</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in data.immut %}
+          <tr class="{% if r.label == 'expirado' %}table-success{% endif %}">
+            <td class="{% if r.label == 'expirado' %}fw-semibold{% endif %}">
+              {% if r.label == 'expirado' %}<i class="bi bi-unlock me-1"></i>{% endif %}
+              {{ immut_labels.get(r.label, r.label) }}
+            </td>
+            <td>{{ r.logical | fmt_bytes }}</td>
+            <td>{{ r.real | fmt_bytes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 4b. CRONOGRAMA DE EXPIRAÇÃO (por data + acumulado) ══════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-calendar-check me-1"></i>Cronograma de Expiração de Imutabilidade
+    </span>
+    <span class="text-muted small ms-1">— quanto libera por dia (acumulado)</span>
+  </div>
+  <div class="card-body">
+
+    {% if data.expira_sel %}
+    <div class="alert alert-info d-flex flex-wrap gap-4 py-2 mb-3">
+      <div>
+        <div class="small text-muted">Vence exatamente em {{ data.expira_sel.date }}</div>
+        <div class="fw-semibold">{{ data.expira_sel.on_real | fmt_bytes }} <span class="text-muted small">real</span></div>
+        <div class="small text-muted">{{ data.expira_sel.on_logical | fmt_bytes }} lógico · {{ data.expira_sel.on_points }} ponto(s)</div>
+      </div>
+      <div>
+        <div class="small text-muted">Acumulado liberável até {{ data.expira_sel.date }}</div>
+        <div class="fw-semibold fs-5 text-success">{{ data.expira_sel.cum_real | fmt_bytes }} <span class="text-muted small">real</span></div>
+        <div class="small text-muted">{{ data.expira_sel.cum_logical | fmt_bytes }} lógico · {{ data.expira_sel.cum_points }} ponto(s)</div>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-3">
+      Escolha uma data em <em>“Imutabilidade expira”</em> (acima) para ver quanto libera
+      e <strong>quais rotinas/VMs</strong>. Use o botão <strong>No dia / Acumulado até</strong>
+      para alternar entre o que vence exatamente na data e o total liberável até ela.
+      A coluna <strong>Acumulado real</strong> na tabela mostra o total liberável até cada dia.
+    </p>
+    {% endif %}
+
+    {% if data.expira_sel and data.expira_jobs %}
+    {% set no_dia = data.expira_modo != 'ate' %}
+    {% set alvo_lbl = ('que vencem em ' if no_dia else 'liberáveis até ') ~ data.expira_sel.date %}
+    <p class="text-muted small mb-2">
+      <i class="bi bi-arrow-return-right me-1"></i>
+      {% if no_dia %}
+      Imutabilidade que <strong>vence exatamente em {{ data.expira_sel.date }}</strong> —
+      o que liberar naquele dia. Se vier quase vazio, a imutabilidade vence em lotes:
+      troque para <strong>Acumulado até</strong> para ver tudo que dá para mover esperando até lá.
+      {% else %}
+      Tudo com imutabilidade <strong>já expirada até {{ data.expira_sel.date }}</strong> —
+      o conjunto que dá para mover para o capacity tier esperando até essa data (acumulado).
+      {% endif %}
+    </p>
+    <div class="row g-3 mb-3">
+      <!-- Jobs que vencem no dia -->
+      <div class="col-lg-6">
+        <div class="border rounded">
+          <div class="px-2 py-1 bg-light border-bottom small fw-semibold">
+            <i class="bi bi-collection me-1"></i>Rotinas {{ alvo_lbl }}
+            <span class="text-muted">({{ data.expira_jobs | length }})</span>
+          </div>
+          <div class="table-responsive" style="max-height:320px;overflow:auto">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light"><tr>
+                <th>Rotina</th><th class="text-end">Pts</th>
+                <th class="text-end">Lógico</th><th class="text-end">Real</th>
+              </tr></thead>
+              <tbody>
+                {% for j in data.expira_jobs %}
+                <tr>
+                  <td class="small">{{ j.job or '—' }}</td>
+                  <td class="text-end">{{ j.points }}</td>
+                  <td class="text-end">{{ j.logical | fmt_bytes }}</td>
+                  <td class="text-end fw-semibold">{{ j.real | fmt_bytes }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- VMs que vencem no dia -->
+      <div class="col-lg-6">
+        <div class="border rounded">
+          <div class="px-2 py-1 bg-light border-bottom small fw-semibold">
+            <i class="bi bi-pc-display me-1"></i>VMs {{ alvo_lbl }}
+            <span class="text-muted">({{ data.expira_vms | length }})</span>
+          </div>
+          <div class="table-responsive" style="max-height:320px;overflow:auto">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light"><tr>
+                <th>VM</th><th>Rotina</th><th class="text-end">Pts</th><th class="text-end">Real</th>
+              </tr></thead>
+              <tbody>
+                {% for v in data.expira_vms %}
+                <tr>
+                  <td class="small">{{ v.vm or '—' }}</td>
+                  <td class="small text-muted">{{ v.job or '—' }}</td>
+                  <td class="text-end">{{ v.points }}</td>
+                  <td class="text-end fw-semibold">{{ v.real | fmt_bytes }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% elif data.expira_sel and data.expira_modo != 'ate' %}
+    <p class="text-muted small mb-3">
+      <i class="bi bi-info-circle me-1"></i>
+      Nada com imutabilidade vencendo <strong>exatamente em {{ data.expira_sel.date }}</strong>.
+      A imutabilidade vence em lotes — troque para <strong>Acumulado até</strong> (acima) para
+      ver tudo que dá para mover para o capacity tier esperando até essa data.
+    </p>
+    {% endif %}
+
+    <div class="alert alert-light border py-2 small mb-3">
+      <i class="bi bi-hdd-network me-1"></i>
+      Volumes do <strong>SOBR inteiro</strong>: os extents formam um único pool, então
+      o espaço liberado ao expirar a imutabilidade volta para o total do SOBR.
+      O <strong>“real”</strong> aplica o fator de calibração (block cloning) — é uma
+      estimativa do que efetivamente libera, não o tamanho lógico bruto.
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Data de expiração</th>
+            <th class="text-end">Pontos</th>
+            <th class="text-end">Lógico (dia)</th>
+            <th class="text-end">Real (dia)</th>
+            <th class="text-end">Acumulado real</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in data.immut_daily %}
+          <tr class="{% if data.expira_ate and r.iso <= data.expira_ate %}table-success{% elif r.expired %}table-warning{% endif %}">
+            <td>
+              {% if r.expired %}<i class="bi bi-unlock me-1 text-success" title="já expirado"></i>{% endif %}
+              {{ r.date }}
+              {% if r.time %}<span class="text-muted small ms-1" title="hora local (UTC-3) de vencimento neste dia">às {{ r.time }}</span>{% endif %}
+            </td>
+            <td class="text-end">{{ r.points }}</td>
+            <td class="text-end">{{ r.logical | fmt_bytes }}</td>
+            <td class="text-end">{{ r.real | fmt_bytes }}</td>
+            <td class="text-end fw-semibold">{{ r.cum_real | fmt_bytes }}</td>
+          </tr>
+          {% endfor %}
+          {% if not data.immut_daily %}
+          <tr><td colspan="5" class="text-muted small text-center">Nenhum ponto com imutabilidade registrada.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 5. CONSUMO POR VM ══════════════════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-pc-display me-1"></i>Consumo por VM
+    </span>
+    <span class="text-muted small ms-1">
+      — top {{ data.vms | length }} de {{ data.n_vms }} VM(s), {{ data.n_points }} ponto(s) de restauração
+    </span>
+  </div>
+  <div class="card-body p-0">
+    {% if data.vms %}
+    <div class="table-responsive" style="max-height:520px;overflow-y:auto">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light sticky-top">
+          <tr>
+            <th>VM</th>
+            <th>Rotina</th>
+            <th class="text-center">Pontos</th>
+            <th>Lógico</th>
+            <th>Real</th>
+            <th>Último ponto</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in data.vms %}
+          <tr>
+            <td class="fw-semibold">{{ v.vm }}</td>
+            <td class="text-muted small">{{ v.job or '—' }}</td>
+            <td class="text-center">{{ v.points }}</td>
+            <td>{{ v.logical | fmt_bytes }}</td>
+            <td>{{ v.real | fmt_bytes }}</td>
+            <td class="text-muted small">{{ v.last }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0 p-3">Nenhum ponto de restauração encontrado com os filtros atuais.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ═══ 6. GFS ══════════════════════════════════════════════════════════════ -->
+{% if data.gfs %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold small">
+      <i class="bi bi-archive me-1"></i>GFS (Retenção Estendida)
+    </span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Período</th>
+            <th class="text-center">Pontos</th>
+            <th>Lógico</th>
+            <th>Real</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in data.gfs %}
+          <tr>
+            <td>{{ g.period }}</td>
+            <td class="text-center">{{ g.points }}</td>
+            <td>{{ g.logical | fmt_bytes }}</td>
+            <td>{{ g.real | fmt_bytes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

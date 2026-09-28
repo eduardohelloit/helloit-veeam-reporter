@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Servidores Duplicados — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-files me-2"></i>Servidores Duplicados
+  </h2>
+  <button id="btnExportCsv" class="btn btn-outline-success btn-sm" disabled>
+    <i class="bi bi-filetype-csv me-1"></i>Exportar CSV
+  </button>
+</div>
+
+<p class="page-subtitle mb-4">
+  Servidores/VMs cuja <strong>imagem é protegida por mais de uma rotina</strong> no período —
+  potencial duplicidade de backup. Baseado nos eventos do Event Viewer (EV150 por VM × EV190 do job,
+  unidos pelo identificador de sessão).
+</p>
+
+{# ── Filtros ──────────────────────────────────────────────────────────────── #}
+<div class="card shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-end">
+
+      {% if clients | length != 1 %}
+      <div class="col-md-4">
+        <label class="form-label fw-semibold small mb-1">Cliente</label>
+        <select id="fClient" class="form-select form-select-sm">
+          {% if clients | length > 1 %}<option value="">Todos os clientes</option>{% endif %}
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% else %}
+      <input type="hidden" id="fClient" value="{{ clients[0].id }}">
+      {% endif %}
+
+      <div class="col-md-3">
+        <label class="form-label fw-semibold small mb-1">Período</label>
+        <select id="fDays" class="form-select form-select-sm">
+          <option value="7">Últimos 7 dias</option>
+          <option value="14">Últimos 14 dias</option>
+          <option value="30" selected>Últimos 30 dias</option>
+          <option value="60">Últimos 60 dias</option>
+          <option value="90">Últimos 90 dias</option>
+        </select>
+      </div>
+
+      <div class="col-md-2">
+        <button id="btnSearch" class="btn btn-primary btn-sm w-100">
+          <i class="bi bi-search me-1"></i>Analisar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Resumo ───────────────────────────────────────────────────────────────── #}
+<div id="summary" class="alert alert-info d-none mb-3">
+  <i class="bi bi-info-circle me-2"></i><span id="summaryText"></span>
+</div>
+
+{# ── Resultado ────────────────────────────────────────────────────────────── #}
+<div class="card shadow-sm" id="resultCard" style="display:none;">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0" id="dupTable">
+      <thead class="table-light">
+        <tr>
+          <th>Servidor / VM</th>
+          {% if clients | length != 1 %}<th>Cliente</th>{% endif %}
+          <th class="text-center">Nº rotinas</th>
+          <th>Rotinas</th>
+        </tr>
+      </thead>
+      <tbody id="dupBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="emptyState" class="text-center py-5 text-muted">
+  <i class="bi bi-funnel fs-1 d-block mb-3 opacity-25"></i>
+  Selecione o período e clique em <strong>Analisar</strong>.
+</div>
+<div id="noResults" class="text-center py-4 text-success" style="display:none;">
+  <i class="bi bi-check-circle fs-1 d-block mb-2"></i>
+  Nenhum servidor duplicado no período. 👍
+</div>
+<div id="loadingState" class="text-center py-5" style="display:none;">
+  <div class="spinner-border text-primary"></div>
+  <div class="mt-2 text-muted small">Analisando eventos...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const showCliente = {{ 'true' if clients|length != 1 else 'false' }};
+let lastRows = [];
+
+async function analisar() {
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('noResults').style.display = 'none';
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('summary').classList.add('d-none');
+  document.getElementById('loadingState').style.display = '';
+  document.getElementById('btnExportCsv').disabled = true;
+
+  const p = new URLSearchParams();
+  const cv = document.getElementById('fClient').value;
+  if (cv) p.set('client_id', cv);
+  p.set('days', document.getElementById('fDays').value);
+
+  try {
+    const resp = await fetch('/api/analytics/duplicates?' + p);
+    document.getElementById('loadingState').style.display = 'none';
+    if (!resp.ok) {
+      document.getElementById('emptyState').style.display = '';
+      if (resp.status === 403) {
+        document.getElementById('emptyState').innerHTML =
+          '<i class="bi bi-shield-lock fs-1 d-block mb-3 opacity-25"></i>Selecione um cliente do seu escopo.';
+      }
+      return;
+    }
+    const data = await resp.json();
+    lastRows = data.items || [];
+
+    if (!lastRows.length) {
+      document.getElementById('noResults').style.display = '';
+      return;
+    }
+
+    const tbody = document.getElementById('dupBody');
+    tbody.innerHTML = '';
+    lastRows.forEach(r => {
+      const badges = r.routines.map(x =>
+        `<span class="badge bg-warning text-dark border me-1 mb-1">${x}</span>`).join('');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="fw-semibold">${r.server}</td>
+        ${showCliente ? `<td class="small text-muted">${r.client}</td>` : ''}
+        <td class="text-center"><span class="badge bg-danger">${r.count}</span></td>
+        <td>${badges}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('summaryText').textContent =
+      `${lastRows.length} servidor(es) com backup em mais de uma rotina no período.`;
+    document.getElementById('summary').classList.remove('d-none');
+    document.getElementById('resultCard').style.display = '';
+    document.getElementById('btnExportCsv').disabled = false;
+  } catch (e) {
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('emptyState').style.display = '';
+  }
+}
+
+function exportCsv() {
+  if (!lastRows.length) return;
+  const head = ['Servidor', 'Cliente', 'Nº rotinas', 'Rotinas'];
+  const lines = [head.join(';')];
+  lastRows.forEach(r => {
+    lines.push([
+      `"${r.server}"`, `"${r.client}"`, r.count, `"${r.routines.join(' | ')}"`
+    ].join(';'));
+  });
+  const blob = new Blob(["﻿" + lines.join("\r\n")], {type: 'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'servidores_duplicados_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+document.getElementById('btnSearch').addEventListener('click', analisar);
+document.getElementById('btnExportCsv').addEventListener('click', exportCsv);
+// auto-analisa quando há cliente único
+if (!showCliente) document.addEventListener('DOMContentLoaded', analisar);
+</script>
+{% endblock %}

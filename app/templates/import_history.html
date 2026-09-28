@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Histórico de Cargas — Veeam Reporter{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0"><i class="bi bi-clock-history me-2"></i>Histórico de Cargas</h2>
+    <p class="page-subtitle mb-0">Todos os uploads de arquivos de eventos realizados.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/import" class="btn btn-primary btn-sm">
+      <i class="bi bi-upload me-1"></i>Nova importação
+    </a>
+    <a href="/reports/new" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-file-earmark-bar-graph me-1"></i>Gerar relatório
+    </a>
+  </div>
+</div>
+
+<!-- Filtro por cliente -->
+{% if clients %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="d-flex align-items-center gap-2 flex-wrap">
+      <label class="small fw-semibold text-muted flex-shrink-0">
+        <i class="bi bi-funnel me-1"></i>Filtrar por cliente:
+      </label>
+      <select name="client_id" class="form-select form-select-sm" style="max-width:280px"
+              onchange="this.form.submit()">
+        <option value="">Todos os clientes</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>
+          {{ c.name }}
+        </option>
+        {% endfor %}
+      </select>
+      {% if selected_client_id %}
+      <a href="/history" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-x me-1"></i>Limpar
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if sessions %}
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>Cliente</th>
+          <th>Arquivo</th>
+          <th class="text-center">Lidos</th>
+          <th class="text-center">Novos</th>
+          <th class="text-center">Dup.</th>
+          <th>Período detectado</th>
+          <th>Importado em</th>
+          <th class="text-center">Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sessions %}
+        <tr>
+          <td class="fw-semibold">
+            <i class="bi bi-building me-1 text-muted"></i>
+            {{ s.client.name if s.client else '—' }}
+          </td>
+          <td class="small text-muted">
+            <i class="bi bi-file-earmark me-1"></i>{{ s.original_filename }}
+            <span class="badge bg-light text-dark ms-1">.{{ s.file_format }}</span>
+          </td>
+          <td class="text-center">
+            {{ (s.total_events_read or 0) | format_number }}
+          </td>
+          <td class="text-center">
+            <span class="text-success fw-semibold">
+              +{{ (s.new_events_inserted or 0) | format_number }}
+            </span>
+          </td>
+          <td class="text-center text-muted small">
+            {{ (s.duplicate_events_skipped or 0) | format_number }}
+          </td>
+          <td class="small">
+            {% if s.period_start and s.period_end %}
+            <i class="bi bi-calendar-range me-1 text-primary"></i>
+            {{ s.period_start.strftime('%d/%m/%Y') }} →
+            {{ s.period_end.strftime('%d/%m/%Y') }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="small text-muted">
+            {{ s.uploaded_at.strftime('%d/%m/%Y %H:%M') if s.uploaded_at else '—' }}
+            {% if s.uploaded_by %}
+            <br><span class="text-muted">por {{ s.uploaded_by }}</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if s.status == 'done' %}
+            <span class="badge bg-success">Concluído</span>
+            {% elif s.status == 'error' %}
+            <span class="badge bg-danger" title="{{ s.error_message }}">Erro</span>
+            {% else %}
+            <span class="badge bg-warning text-dark">Processando</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              {% if s.status == 'done' %}
+              <a href="/import/{{ s.id }}/summary" class="btn btn-outline-primary btn-sm py-0">
+                <i class="bi bi-list-check"></i>
+              </a>
+              {% elif s.status == 'processing' %}
+              <a href="/import/processing/{{ s.id }}" class="btn btn-outline-warning btn-sm py-0">
+                <i class="bi bi-hourglass-split"></i>
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  Nenhuma importação encontrada.
+  <a href="/import" class="alert-link">Faça o upload</a> de um arquivo de eventos para começar.
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,692 @@
+{% extends "base.html" %}
+{% block title %}RPO por VM — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+
+<!-- ── Cabeçalho ─────────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-clock-history me-2"></i>RPO Observado por VM
+      <span id="headerClientName" class="text-muted fw-normal fs-5 ms-2 d-none">
+        — <span id="headerClientNameText"></span>
+      </span>
+    </h2>
+    <p class="page-subtitle mb-0">RPO observado × RPO esperado configurado por VM</p>
+  </div>
+  <div class="d-flex gap-2 d-none" id="headerExportBtns">
+    <button class="btn btn-sm btn-outline-success" id="btnExportRPOExcel">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar RPO por VM
+    </button>
+  </div>
+</div>
+
+<!-- ── Nota explicativa ───────────────────────────────────────────────────────── -->
+<div class="alert border-0 py-2 mb-3 small d-flex gap-2" style="background:rgba(13,110,253,.07)">
+  <i class="bi bi-info-circle-fill text-primary mt-1 flex-shrink-0"></i>
+  <span>
+    O <strong>RPO Observado</strong> é calculado com base no intervalo entre backups bem-sucedidos (EV150, tipo
+    <em>backup</em>). Transaction Logs não são considerados. O <strong>status</strong> é calculado comparando
+    o RPO observado com o <strong>RPO esperado configurado</strong> para a VM. VMs sem política configurada
+    usam o padrão global de <strong>{{ default_rpo_h }}h</strong>.
+    <a href="/admin/rpo-policies" class="ms-1">Gerenciar políticas →</a>
+  </span>
+</div>
+
+<!-- ── Filtros ────────────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-building me-1 text-muted"></i>Cliente</label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>De</label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>Até</label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-12 col-sm-6 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-funnel me-1 text-muted"></i>Status RPO</label>
+        <select class="form-select form-select-sm" id="selStatus">
+          <option value="all">Todos</option>
+          <option value="ok">✅ Dentro do RPO</option>
+          <option value="attention">⚠️ Atenção (até 150%)</option>
+          <option value="critical">🔴 Fora do RPO (&gt;150%)</option>
+          <option value="no_history">📊 Histórico insuficiente</option>
+          <option value="no_backup">⛔ Sem backup com sucesso</option>
+          <option value="no_configured">⚙️ Sem RPO configurado</option>
+          <option value="critical_all">🔴 Crítico + Sem backup</option>
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-3 d-flex gap-1">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado inicial ─────────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-clock-history fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione os filtros e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Calculando RPO observado...</p>
+</div>
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-3">Nenhuma VM encontrada para o período e filtros selecionados.</p>
+</div>
+
+<!-- ── Conteúdo ────────────────────────────────────────────────────────────────── -->
+<div id="rpoContent" class="d-none">
+
+  <!-- KPI cards: 6 cards em 2 linhas de 3 -->
+  <div class="row g-2 mb-3">
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #198754">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-check-circle-fill me-1 text-success"></i>Dentro do RPO
+          </div>
+          <div class="kpi-number text-success" id="kpiOK" style="font-size:1.8rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">obs ≤ esperado</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #ffc107">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-exclamation-triangle-fill me-1 text-warning"></i>Em Atenção
+          </div>
+          <div class="kpi-number text-warning" id="kpiAttention" style="font-size:1.8rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">até 150% do RPO</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #dc3545">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-x-circle-fill me-1 text-danger"></i>Fora do RPO
+          </div>
+          <div class="kpi-number text-danger" id="kpiCritical" style="font-size:1.8rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">&gt;150% do RPO esperado</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #6c757d">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-gear me-1 text-secondary"></i>Sem RPO Config.
+          </div>
+          <div class="kpi-number text-secondary" id="kpiNoConfigured" style="font-size:1.8rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">usando padrão {{ default_rpo_h }}h</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #adb5bd">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-dash-circle me-1 text-secondary"></i>Sem Histórico
+          </div>
+          <div class="kpi-number text-secondary" id="kpiNoHistory" style="font-size:1.8rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">&lt; 2 backups no período</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #6f42c1">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-clock-history me-1" style="color:#6f42c1"></i>RPO Médio Obs.
+          </div>
+          <div class="kpi-number" style="font-size:1.5rem;color:#6f42c1" id="kpiAvgRPO">—</div>
+          <div class="text-muted" style="font-size:.68rem">entre VMs com histórico</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Tabela de VMs -->
+  <div class="card shadow-sm">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>
+        <i class="bi bi-table me-2 text-muted"></i>VMs — RPO Observado × Esperado
+        <span class="badge bg-secondary ms-1" id="vmTotalBadge" style="display:none">—</span>
+      </span>
+      <div class="d-flex align-items-center gap-2" id="vmTableControls">
+        <input type="text" id="vmSearch" class="form-control form-control-sm"
+               placeholder="Buscar VM…" style="width:200px" autocomplete="off">
+      </div>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.78rem">
+        <thead class="table-light" style="font-size:.71rem">
+          <tr>
+            <th class="ps-3" style="min-width:190px">Máquina Virtual</th>
+            <th style="width:150px">Ambiente</th>
+            <th style="width:135px" class="text-center">Último Backup OK</th>
+            <th style="width:110px" class="text-center">
+              RPO Esperado
+              <i class="bi bi-info-circle text-muted ms-1" style="cursor:help"
+                 title="RPO configurado manualmente. VMs sem configuração usam o padrão global."></i>
+            </th>
+            <th style="width:105px" class="text-center">RPO Observado</th>
+            <th style="width:85px"  class="text-center">Desvio</th>
+            <th style="width:90px"  class="text-center">Maior RPO</th>
+            <th style="width:80px"  class="text-center">Backups</th>
+            <th style="width:115px" class="text-center">Desde último</th>
+            <th style="width:110px" class="text-center">Status</th>
+            <th style="width:50px"  class="text-center"></th>
+          </tr>
+        </thead>
+        <tbody id="vmTableBody">
+          <tr><td colspan="11" class="text-center text-muted py-4 small">
+            Clique em <strong>Consultar</strong> para carregar.
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Loading inline -->
+    <div id="vmLoading" class="text-center py-3 d-none">
+      <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+      <span class="text-muted small ms-2">Calculando RPO…</span>
+    </div>
+
+    <!-- Paginação -->
+    <div class="card-footer py-1 px-3 d-none d-flex align-items-center justify-content-between small text-muted flex-wrap gap-2"
+         id="vmPagination">
+      <span id="vmPaginationInfo"></span>
+      <div class="d-flex align-items-center gap-2">
+        <select class="form-select form-select-sm" id="vmPageSize" style="width:auto">
+          <option value="25" selected>25 / página</option>
+          <option value="50">50 / página</option>
+          <option value="100">100 / página</option>
+        </select>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" id="btnVMFirst"><i class="bi bi-chevron-double-left"></i></button>
+          <button class="btn btn-outline-secondary" id="btnVMPrev"><i class="bi bi-chevron-left"></i></button>
+          <span class="btn btn-outline-secondary disabled px-2" id="vmPageIndicator"
+                style="pointer-events:none;min-width:72px;text-align:center">—</span>
+          <button class="btn btn-outline-secondary" id="btnVMNext"><i class="bi bi-chevron-right"></i></button>
+          <button class="btn btn-outline-secondary" id="btnVMLast"><i class="bi bi-chevron-double-right"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legenda -->
+  <div class="d-flex flex-wrap gap-3 small text-muted mt-2">
+    <span><span class="badge" style="background:#198754">Dentro</span> obs ≤ RPO esperado</span>
+    <span><span class="badge bg-warning text-dark">Atenção</span> obs até 150% do esperado</span>
+    <span><span class="badge bg-danger">Fora</span> obs &gt; 150% do esperado</span>
+    <span><span class="badge bg-secondary">Histórico insuf.</span> &lt; 2 backups</span>
+    <span><i class="bi bi-gear text-muted"></i> = VM usando RPO padrão global ({{ default_rpo_h }}h)</span>
+  </div>
+
+</div><!-- /rpoContent -->
+
+<!-- ── Modal: Configurar RPO ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="modalConfigRPO" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold">
+          <i class="bi bi-stopwatch me-2"></i>Configurar RPO Esperado
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body py-3">
+        <input type="hidden" id="cfgAssignmentId">
+        <input type="hidden" id="cfgClientId">
+        <input type="hidden" id="cfgVMName">
+
+        <div class="mb-3">
+          <div class="fw-semibold" id="cfgVMLabel">—</div>
+          <div class="small text-muted" id="cfgClientLabel">—</div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold small mb-1">Política de RPO</label>
+          <select class="form-select form-select-sm" id="cfgPolicy" onchange="onCfgPolicyChange()">
+            <option value="">Personalizado (definir manualmente)</option>
+            {% for p in policies %}
+            <option value="{{ p.id }}" data-minutes="{{ p.expected_minutes }}">
+              {{ p.name }} ({{ (p.expected_minutes // 60)|string + 'h' if p.expected_minutes >= 60 else p.expected_minutes|string + 'min' }})
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold small mb-1">RPO Esperado (minutos) *</label>
+          <div class="input-group input-group-sm">
+            <input type="number" class="form-control" id="cfgMinutes" min="1" placeholder="Ex: 120">
+            <span class="input-group-text text-muted" id="cfgMinutesDisplay">—</span>
+          </div>
+          <div class="form-text small">Exemplos: 60 = 1h · 120 = 2h · 1440 = 24h</div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold small mb-1">Criticidade desta VM</label>
+          <select class="form-select form-select-sm" id="cfgCriticality">
+            <option value="">Não definida</option>
+            <option value="low">Baixa</option>
+            <option value="medium">Média</option>
+            <option value="high">Alta</option>
+            <option value="critical">Crítica</option>
+          </select>
+        </div>
+
+        <div class="mb-0">
+          <label class="form-label fw-semibold small mb-1">Observação</label>
+          <input type="text" class="form-control form-control-sm" id="cfgNotes"
+                 placeholder="Ex: SQL produção, backup a cada 2h" maxlength="300">
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-danger me-auto" id="btnRemoveRPO" style="display:none">
+          <i class="bi bi-trash me-1"></i>Remover configuração
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-sm btn-primary" id="btnSaveRPO">
+          <i class="bi bi-floppy me-1"></i>Salvar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// RPO por VM — com RPO Esperado
+// ════════════════════════════════════════════════════════════════════════════
+
+function fmtH(h) {
+  if (h === null || h === undefined) return '—';
+  h = parseFloat(h);
+  if (isNaN(h)) return '—';
+  const d  = Math.floor(h / 24);
+  const hr = Math.floor(h % 24);
+  const m  = Math.round((h * 60) % 60);
+  if (d  > 0) return `${d}d ${hr}h ${m}m`;
+  if (hr > 0) return `${hr}h ${m}m`;
+  return `${m}m`;
+}
+
+function fmtMin(mins) {
+  if (!mins) return '—';
+  return fmtH(mins / 60);
+}
+
+function fmt(n)  { return (n ?? 0).toLocaleString('pt-BR'); }
+function esc(s)  {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function todayStr()   { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; }
+function setDefaultDates() {
+  document.getElementById('dateStart').value = daysAgoStr(30);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+
+// ── Status badges ─────────────────────────────────────────────────────────────
+function statusBadge(st) {
+  const MAP = {
+    ok:         `<span class="badge" style="background:#198754;font-size:.68rem">Dentro do RPO</span>`,
+    attention:  `<span class="badge bg-warning text-dark" style="font-size:.68rem">Atenção</span>`,
+    critical:   `<span class="badge bg-danger" style="font-size:.68rem">Fora do RPO</span>`,
+    no_history: `<span class="badge bg-secondary" style="font-size:.68rem">Hist. insuf.</span>`,
+    no_backup:  `<span class="badge" style="background:#842029;color:#fff;font-size:.68rem">Sem backup</span>`,
+  };
+  return MAP[st] || `<span class="badge bg-light text-dark">${esc(st)}</span>`;
+}
+
+// ── Estado visual ─────────────────────────────────────────────────────────────
+function showWaiting() {
+  ['waitingState'].forEach(id => document.getElementById(id).classList.remove('d-none'));
+  ['emptyState','rpoContent'].forEach(id => document.getElementById(id).classList.add('d-none'));
+  document.getElementById('headerExportBtns').classList.add('d-none');
+  document.getElementById('headerClientName').classList.add('d-none');
+}
+
+function updateClientHeader() {
+  const sel  = document.getElementById('selClient');
+  const name = sel.options[sel.selectedIndex]?.text || '';
+  const wrap = document.getElementById('headerClientName');
+  if (sel.value && name !== 'Todos os clientes') {
+    document.getElementById('headerClientNameText').textContent = name;
+    wrap.classList.remove('d-none');
+  } else { wrap.classList.add('d-none'); }
+}
+
+// ── KPIs ──────────────────────────────────────────────────────────────────────
+function updateKPIs(k) {
+  document.getElementById('kpiOK').textContent          = fmt(k.vms_ok);
+  document.getElementById('kpiAttention').textContent   = fmt(k.vms_attention);
+  document.getElementById('kpiCritical').textContent    = fmt(k.vms_critical + k.vms_no_backup);
+  document.getElementById('kpiNoConfigured').textContent= fmt(k.vms_no_configured);
+  document.getElementById('kpiNoHistory').textContent   = fmt(k.vms_no_history);
+  document.getElementById('kpiAvgRPO').textContent      = k.global_avg_rpo_h !== null ? fmtH(k.global_avg_rpo_h) : '—';
+}
+
+// ── Carregar KPIs ─────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final.'); return; }
+  const clientId = document.getElementById('selClient').value;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+  document.getElementById('rpoContent').classList.add('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/rpo-dashboard?' + params);
+    if (!resp.ok) { const e=await resp.json().catch(()=>({})); alert(e.error||'Erro.'); showWaiting(); return; }
+    const data = await resp.json();
+    const k    = data.kpis;
+
+    const isEmpty = k.total_vms === 0;
+    document.getElementById('emptyState').classList.toggle('d-none', !isEmpty);
+    document.getElementById('rpoContent').classList.toggle('d-none', isEmpty);
+
+    if (!isEmpty) {
+      updateKPIs(k);
+      document.getElementById('headerExportBtns').classList.remove('d-none');
+      document.getElementById('vmSearch').value = '';
+      loadVMList(1);
+    }
+  } catch(e) { console.error(e); showWaiting(); }
+  finally { document.getElementById('loadingOverlay').classList.add('d-none'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VM LIST
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _vmPage = 1; let _vmPageSize = 25; let _vmTotalPages = 1;
+
+function _buildVMParams(page, pageSize) {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const clientId  = document.getElementById('selClient').value;
+  const search    = document.getElementById('vmSearch').value.trim();
+  const status    = document.getElementById('selStatus').value;
+  const p = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, page, page_size: pageSize });
+  if (clientId) p.set('client_id', clientId);
+  if (search)   p.set('search', search);
+  if (status && status !== 'all') p.set('rpo_status', status);
+  return p;
+}
+
+function updateVMPagination(p) {
+  const div  = document.getElementById('vmPagination');
+  const info = document.getElementById('vmPaginationInfo');
+  if (!p || p.total === 0) { div.classList.add('d-none'); return; }
+  div.classList.remove('d-none');
+  const from = (p.page-1)*p.page_size+1;
+  const to   = Math.min(p.page*p.page_size, p.total);
+  info.textContent = `${from}–${to} de ${fmt(p.total)} VMs`;
+  const atFirst = p.page <= 1; const atLast = p.page >= p.total_pages;
+  document.getElementById('btnVMFirst').disabled = atFirst;
+  document.getElementById('btnVMPrev').disabled  = atFirst;
+  document.getElementById('btnVMNext').disabled  = atLast;
+  document.getElementById('btnVMLast').disabled  = atLast;
+  document.getElementById('vmPageIndicator').textContent = `${p.page} / ${p.total_pages}`;
+  _vmPage       = p.page;
+  _vmPageSize   = p.page_size;
+  _vmTotalPages = p.total_pages;
+}
+
+function renderVMTable(vms) {
+  const tbody = document.getElementById('vmTableBody');
+  if (!vms.length) {
+    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4 small">Nenhuma VM encontrada.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = vms.map(vm => {
+    // RPO observado — colorir por status
+    const obsColor = vm.status === 'ok' ? 'text-success' : vm.status === 'attention' ? 'text-warning fw-semibold' : vm.status === 'critical' ? 'text-danger fw-bold' : 'text-muted';
+    const obsCell  = vm.avg_rpo_h !== null
+      ? `<span class="${obsColor}">${fmtH(vm.avg_rpo_h)}</span>`
+      : '<span class="text-muted fst-italic small">—</span>';
+
+    // RPO esperado
+    const expIcon = vm.rpo_source === 'configured' ? '' : ' <i class="bi bi-gear text-muted" title="Usando RPO padrão global" style="font-size:.65rem"></i>';
+    const expCell = `${fmtMin(vm.expected_minutes)}${expIcon}`;
+
+    // Desvio
+    let devCell = '—';
+    if (vm.deviation_pct !== null) {
+      const devCls = vm.deviation_pct <= 0 ? 'text-success' : vm.deviation_pct <= 50 ? 'text-warning' : 'text-danger fw-bold';
+      const sign   = vm.deviation_pct > 0 ? '+' : '';
+      devCell = `<span class="${devCls}">${sign}${vm.deviation_pct}%</span>`;
+    }
+
+    // Tempo desde último backup
+    let sinceCell = fmtH(vm.since_h);
+    if (vm.since_h !== null) {
+      const sh = parseFloat(vm.since_h);
+      if (sh > 48) sinceCell = `<span class="text-danger fw-semibold">${sinceCell}</span>`;
+      else if (sh > 24) sinceCell = `<span class="text-warning fw-semibold">${sinceCell}</span>`;
+    }
+
+    const lastBkp = vm.last_backup
+      ? `<span class="small">${esc(vm.last_backup)}</span>`
+      : '<span class="text-muted small">—</span>';
+
+    return `<tr>
+      <td class="ps-3 fw-semibold small text-truncate" style="max-width:190px" title="${esc(vm.vm_name)}">${esc(vm.vm_name)}</td>
+      <td class="small text-muted text-truncate" style="max-width:150px" title="${esc(vm.client_name)}">${esc(vm.client_name)}</td>
+      <td class="text-center">${lastBkp}</td>
+      <td class="text-center small fw-semibold">${expCell}</td>
+      <td class="text-center fw-semibold">${obsCell}</td>
+      <td class="text-center small">${devCell}</td>
+      <td class="text-center small text-muted">${fmtH(vm.max_rpo_h)}</td>
+      <td class="text-center">
+        <span class="badge ${vm.backup_count < 2 ? 'bg-secondary' : 'bg-light text-dark border'}" style="font-size:.72rem">${fmt(vm.backup_count)}</span>
+      </td>
+      <td class="text-center small">${sinceCell}</td>
+      <td class="text-center">${statusBadge(vm.status)}</td>
+      <td class="text-center">
+        <button class="btn btn-link btn-sm p-0 text-primary" style="font-size:.80rem"
+                title="Configurar RPO Esperado"
+                onclick="openConfigRPO('${esc(vm.vm_name)}',${vm.client_id},'${esc(vm.client_name)}',${vm.assignment_id||'null'},${vm.expected_minutes||'null'},'${esc(vm.policy_id||'')}','${esc(vm.criticality||'')}','${esc(vm.policy_name||'')}')">
+          <i class="bi bi-gear"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadVMList(page) {
+  _vmPage = page;
+  const pageSize = parseInt(document.getElementById('vmPageSize').value) || 25;
+  document.getElementById('vmLoading').classList.remove('d-none');
+  document.getElementById('vmTableBody').style.opacity = '0.4';
+
+  try {
+    const params = _buildVMParams(page, pageSize);
+    const resp   = await fetch('/api/rpo-vm-list?' + params);
+    if (!resp.ok) { console.error('RPO vm-list error'); return; }
+    const data   = await resp.json();
+
+    const badge = document.getElementById('vmTotalBadge');
+    badge.textContent = fmt(data.total) + ' VMs'; badge.style.display='';
+
+    renderVMTable(data.vms || []);
+    updateVMPagination({ page: data.page, page_size: data.page_size,
+                         total: data.total, total_pages: data.total_pages });
+  } catch(e) { console.error('loadVMList:', e); }
+  finally {
+    document.getElementById('vmLoading').classList.add('d-none');
+    document.getElementById('vmTableBody').style.opacity = '1';
+  }
+}
+
+// ── Debounce busca ────────────────────────────────────────────────────────────
+let _searchTimer = null;
+document.getElementById('vmSearch').addEventListener('input', function() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => {
+    if (!document.getElementById('rpoContent').classList.contains('d-none')) loadVMList(1);
+  }, 420);
+});
+
+document.getElementById('selStatus').addEventListener('change', function() {
+  if (!document.getElementById('rpoContent').classList.contains('d-none')) loadVMList(1);
+});
+
+// ── Paginação ─────────────────────────────────────────────────────────────────
+document.getElementById('btnVMFirst').addEventListener('click', () => loadVMList(1));
+document.getElementById('btnVMPrev').addEventListener('click',  () => loadVMList(_vmPage - 1));
+document.getElementById('btnVMNext').addEventListener('click',  () => loadVMList(_vmPage + 1));
+document.getElementById('btnVMLast').addEventListener('click',  () => loadVMList(_vmTotalPages));
+document.getElementById('vmPageSize').addEventListener('change', function() {
+  _vmPageSize = parseInt(this.value); loadVMList(1);
+});
+
+// ── Exportar Excel ────────────────────────────────────────────────────────────
+document.getElementById('btnExportRPOExcel').addEventListener('click', () => {
+  const p = _buildVMParams(1, 10000);
+  p.delete('page'); p.delete('page_size');
+  window.location.href = '/api/export/rpo-excel?' + p.toString();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODAL: CONFIGURAR RPO ESPERADO
+// ══════════════════════════════════════════════════════════════════════════════
+
+const modalCfgRPO = new bootstrap.Modal(document.getElementById('modalConfigRPO'));
+
+function openConfigRPO(vmName, clientId, clientName, assignmentId, expectedMinutes, policyId, criticality, policyName) {
+  document.getElementById('cfgVMName').value    = vmName;
+  document.getElementById('cfgClientId').value  = clientId;
+  document.getElementById('cfgVMLabel').textContent     = vmName;
+  document.getElementById('cfgClientLabel').textContent = clientName;
+  document.getElementById('cfgAssignmentId').value = assignmentId || '';
+
+  // Select policy
+  const polSel = document.getElementById('cfgPolicy');
+  polSel.value = policyId || '';
+
+  // Minutes
+  document.getElementById('cfgMinutes').value      = expectedMinutes || '';
+  document.getElementById('cfgCriticality').value  = criticality || '';
+  document.getElementById('cfgNotes').value         = '';
+  updateCfgMinutesDisplay();
+
+  // Show remove button only when there's an existing assignment
+  document.getElementById('btnRemoveRPO').style.display = assignmentId ? '' : 'none';
+
+  modalCfgRPO.show();
+}
+
+function onCfgPolicyChange() {
+  const sel = document.getElementById('cfgPolicy');
+  const opt = sel.options[sel.selectedIndex];
+  const mins = opt?.dataset?.minutes;
+  if (mins) { document.getElementById('cfgMinutes').value = mins; updateCfgMinutesDisplay(); }
+}
+
+document.getElementById('cfgMinutes').addEventListener('input', updateCfgMinutesDisplay);
+
+function updateCfgMinutesDisplay() {
+  const m = parseInt(document.getElementById('cfgMinutes').value) || 0;
+  document.getElementById('cfgMinutesDisplay').textContent = m ? fmtMin(m) : '—';
+}
+
+document.getElementById('btnSaveRPO').addEventListener('click', async () => {
+  const clientId = parseInt(document.getElementById('cfgClientId').value);
+  const vmName   = document.getElementById('cfgVMName').value;
+  const minutes  = parseInt(document.getElementById('cfgMinutes').value) || 0;
+  const polId    = parseInt(document.getElementById('cfgPolicy').value) || null;
+  if (!minutes) { alert('Informe os minutos esperados.'); return; }
+
+  try {
+    await fetch('/api/rpo-assignment', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        client_id: clientId, vm_name: vmName,
+        expected_minutes: minutes,
+        rpo_policy_id: polId,
+        criticality: document.getElementById('cfgCriticality').value||null,
+        notes: document.getElementById('cfgNotes').value.trim()||null,
+      }),
+    });
+    modalCfgRPO.hide();
+    // Reload only the list (KPIs stay same for performance)
+    await loadVMList(_vmPage);
+  } catch(e) { alert('Erro ao salvar configuração de RPO.'); }
+});
+
+document.getElementById('btnRemoveRPO').addEventListener('click', async () => {
+  const assignId = document.getElementById('cfgAssignmentId').value;
+  if (!assignId) return;
+  if (!confirm('Remover configuração de RPO desta VM? Ela voltará a usar o padrão global.')) return;
+  try {
+    await fetch(`/api/rpo-assignment/${assignId}`, { method: 'DELETE' });
+    modalCfgRPO.hide();
+    await loadVMList(_vmPage);
+  } catch(e) { alert('Erro ao remover.'); }
+});
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadDashboard);
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value = '';
+  document.getElementById('selStatus').value = 'all';
+  setDefaultDates(); updateClientHeader(); showWaiting();
+});
+document.getElementById('selClient').addEventListener('change', updateClientHeader);
+
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

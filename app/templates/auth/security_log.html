@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Log de Segurança — Veeam Reporter{% endblock %}
+
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+  <div style="width:36px;height:36px;background:var(--hi-primary);border-radius:8px;display:flex;align-items:center;justify-content:center">
+    <i class="bi bi-journal-text text-white"></i>
+  </div>
+  <div>
+    <h5 class="mb-0 fw-bold">Log de Segurança</h5>
+    <p class="text-muted small mb-0">{{ total }} evento(s) registrado(s)</p>
+  </div>
+</div>
+
+<!-- Filtros -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-3">
+    <form method="get" action="/admin/security-log" class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-semibold mb-1">Tipo de evento</label>
+        <select name="event_type" class="form-select form-select-sm">
+          <option value="all" {{ 'selected' if event_type == 'all' else '' }}>Todos</option>
+          {% for t in all_types %}
+          <option value="{{ t }}" {{ 'selected' if event_type == t else '' }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-semibold mb-1">Usuário</label>
+        <input type="text" name="username" class="form-control form-control-sm"
+               value="{{ username }}" placeholder="filtrar por usuário...">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-funnel me-1"></i>Filtrar
+        </button>
+        <a href="/admin/security-log" class="btn btn-outline-secondary btn-sm ms-1">
+          <i class="bi bi-x-lg"></i>
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabela de logs -->
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0" style="font-size:.85rem">
+      <thead class="table-light">
+        <tr>
+          <th>Data / Hora</th>
+          <th>Evento</th>
+          <th>Usuário</th>
+          <th>Ator</th>
+          <th>IP</th>
+          <th>Detalhes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="text-muted font-monospace" style="font-size:.78rem;white-space:nowrap">
+            {{ log.created_at.strftime('%d/%m/%Y %H:%M:%S') }}
+          </td>
+          <td>
+            {% set ev = log.event_type %}
+            {% if ev == 'login_success' %}
+            <span class="badge bg-success"><i class="bi bi-box-arrow-in-right me-1"></i>Login</span>
+            {% elif ev == 'login_fail' %}
+            <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Falha Login</span>
+            {% elif ev == 'logout' %}
+            <span class="badge bg-secondary"><i class="bi bi-box-arrow-right me-1"></i>Logout</span>
+            {% elif ev == 'account_locked' %}
+            <span class="badge bg-danger"><i class="bi bi-lock-fill me-1"></i>Conta Bloqueada</span>
+            {% elif ev == 'user_created' %}
+            <span class="badge bg-primary"><i class="bi bi-person-plus me-1"></i>Usuário Criado</span>
+            {% elif ev == 'user_edited' %}
+            <span class="badge bg-info text-dark"><i class="bi bi-pencil me-1"></i>Usuário Editado</span>
+            {% elif ev == 'user_disabled' %}
+            <span class="badge bg-warning text-dark"><i class="bi bi-pause-circle me-1"></i>Desativado</span>
+            {% elif ev == 'user_activated' %}
+            <span class="badge bg-success"><i class="bi bi-play-circle me-1"></i>Ativado</span>
+            {% elif ev == 'user_deleted' %}
+            <span class="badge bg-danger"><i class="bi bi-trash me-1"></i>Excluído</span>
+            {% elif ev == 'password_reset_admin' %}
+            <span class="badge bg-warning text-dark"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset Admin</span>
+            {% elif ev == 'password_changed' %}
+            <span class="badge bg-info text-dark"><i class="bi bi-key me-1"></i>Senha Alterada</span>
+            {% elif ev == 'policy_changed' %}
+            <span class="badge bg-purple" style="background:#6f42c1"><i class="bi bi-sliders me-1"></i>Política</span>
+            {% else %}
+            <span class="badge bg-secondary">{{ ev }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="font-monospace">{{ log.username or '—' }}</span>
+          </td>
+          <td class="text-muted">{{ log.actor or '—' }}</td>
+          <td class="text-muted font-monospace" style="font-size:.75rem">{{ log.ip_address or '—' }}</td>
+          <td class="text-muted" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="{{ log.details or '' }}">
+            {{ log.details or '—' }}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-4">
+            <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+            Nenhum evento encontrado com os filtros aplicados.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginação -->
+  {% if pages > 1 %}
+  <div class="card-footer bg-white border-0 py-3">
+    <nav>
+      <ul class="pagination pagination-sm justify-content-center mb-0">
+        <li class="page-item {{ 'disabled' if page <= 1 else '' }}">
+          <a class="page-link" href="?event_type={{ event_type }}&username={{ username }}&page={{ page - 1 }}">
+            <i class="bi bi-chevron-left"></i>
+          </a>
+        </li>
+        {% for p in range(1, pages + 1) %}
+        <li class="page-item {{ 'active' if p == page else '' }}">
+          <a class="page-link" href="?event_type={{ event_type }}&username={{ username }}&page={{ p }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+        <li class="page-item {{ 'disabled' if page >= pages else '' }}">
+          <a class="page-link" href="?event_type={{ event_type }}&username={{ username }}&page={{ page + 1 }}">
+            <i class="bi bi-chevron-right"></i>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

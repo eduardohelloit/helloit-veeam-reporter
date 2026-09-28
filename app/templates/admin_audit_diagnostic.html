@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}Diagnóstico de Auditoria — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-4">
+  <div style="width:36px;height:36px;background:var(--hi-primary);border-radius:8px;display:flex;align-items:center;justify-content:center">
+    <i class="bi bi-stethoscope text-white"></i>
+  </div>
+  <div>
+    <h5 class="mb-0 fw-bold">Diagnóstico de Auditoria</h5>
+    <p class="text-muted small mb-0">Valida eventos de auditoria na base histórica por cliente</p>
+  </div>
+</div>
+
+<!-- Filtro cliente -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-4">
+        <label class="form-label small fw-semibold mb-1">Cliente</label>
+        <select id="selClient" class="form-select form-select-sm">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button id="btnDiag" class="btn btn-primary btn-sm">
+          <i class="bi bi-search me-1"></i>Executar diagnóstico
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div id="loadingDiv" class="text-center py-5 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Consultando base histórica…</p>
+</div>
+
+<!-- Resultado -->
+<div id="resultDiv"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+'use strict';
+
+function fmt(n) { return (n ?? 0).toLocaleString('pt-BR'); }
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const TYPE_BADGE = {
+  job_created:     'bg-success',
+  job_updated:     'bg-warning text-dark',
+  job_deleted:     'bg-danger',
+  objects_added:   'bg-info text-dark',
+  objects_changed: 'bg-warning text-dark',
+  objects_deleted: 'bg-secondary',
+};
+
+function renderClient(c) {
+  if (c.total === 0) {
+    return `
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-light fw-semibold">
+        <i class="bi bi-building me-2"></i>${esc(c.client_name)}
+        <span class="badge bg-secondary ms-2">Sem eventos de auditoria</span>
+      </div>
+      <div class="card-body py-3 text-muted small">
+        <i class="bi bi-inbox me-2"></i>
+        Nenhum evento de auditoria encontrado para este cliente.
+        Verifique se foram importados arquivos com Event IDs 23010, 23050, 23090, 23110, 23130 ou 32120.
+      </div>
+    </div>`;
+  }
+
+  // Contagem por tipo
+  const byTypeRows = c.by_type.map(t => `
+    <tr>
+      <td><span class="badge ${TYPE_BADGE[t.audit_event_type] || 'bg-secondary'}" style="font-size:.72rem">${esc(t.label)}</span></td>
+      <td class="text-end fw-bold">${fmt(t.count)}</td>
+      <td style="width:160px">
+        <div class="progress" style="height:6px">
+          <div class="progress-bar bg-primary" style="width:${c.total > 0 ? Math.round(t.count/c.total*100) : 0}%"></div>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  // Contagem por event_id
+  const byEidRows = c.by_event_id.map(e => `
+    <tr>
+      <td><code>EV${e.event_id}</code></td>
+      <td class="text-end fw-bold">${fmt(e.count)}</td>
+    </tr>`).join('');
+
+  // Último upload
+  const uploadHtml = c.last_upload ? `
+    <div class="alert alert-light border mb-0 small">
+      <i class="bi bi-cloud-upload me-2 text-primary"></i>
+      <strong>Último upload com auditoria:</strong> Upload #${esc(String(c.last_upload.id))} —
+      <span class="fw-semibold">${esc(c.last_upload.filename)}</span>
+      em ${esc(c.last_upload.uploaded_at)} por ${esc(c.last_upload.uploaded_by)} |
+      ${fmt(c.last_upload.audit_count)} eventos de auditoria |
+      Período: ${esc(c.last_upload.period_start)} → ${esc(c.last_upload.period_end)}
+    </div>` : `
+    <div class="alert alert-warning border mb-0 small">
+      <i class="bi bi-exclamation-triangle me-2"></i>Nenhum upload com auditoria encontrado para este cliente.
+    </div>`;
+
+  // Botão para abrir auditoria nesse período
+  const btnAudit = c.min_date_iso && c.max_date_iso ? `
+    <a href="/dashboard/audit?client_id=${c.client_id}&date_start=${c.min_date_iso}&date_end=${c.max_date_iso}"
+       class="btn btn-outline-primary btn-sm ms-2" target="_blank">
+      <i class="bi bi-box-arrow-up-right me-1"></i>Abrir Auditoria nesse período
+    </a>` : '';
+
+  return `
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">
+        <i class="bi bi-building me-2 text-primary"></i>${esc(c.client_name)}
+      </span>
+      <div>
+        <span class="badge bg-success fs-6">${fmt(c.total)} eventos</span>
+        ${btnAudit}
+      </div>
+    </div>
+    <div class="card-body p-4">
+
+      <!-- KPI Row -->
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <div class="card bg-light border-0 h-100 p-3">
+            <div class="small text-muted mb-1"><i class="bi bi-calendar-range me-1"></i>Período disponível</div>
+            <div class="fw-bold">${esc(c.min_date || '—')}</div>
+            <div class="text-muted small">até</div>
+            <div class="fw-bold">${esc(c.max_date || '—')}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card bg-light border-0 h-100 p-3">
+            <div class="small text-muted mb-1"><i class="bi bi-list-check me-1"></i>Total de eventos</div>
+            <div class="fw-bold fs-4">${fmt(c.total)}</div>
+            <div class="text-muted small">${c.by_type.length} tipo(s) distintos</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card bg-light border-0 h-100 p-3">
+            <div class="small text-muted mb-1"><i class="bi bi-tag me-1"></i>Event IDs presentes</div>
+            <div class="fw-bold">
+              ${c.by_event_id.map(e => `<code class="me-1">EV${e.event_id}</code>`).join('')}
+            </div>
+            <div class="text-muted small">${c.by_event_id.length} tipo(s)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabelas side by side -->
+      <div class="row g-3 mb-3">
+        <div class="col-md-7">
+          <p class="fw-semibold small mb-2"><i class="bi bi-bar-chart me-1 text-muted"></i>Por tipo de evento</p>
+          <table class="table table-sm table-hover align-middle" style="font-size:.82rem">
+            <thead class="table-light">
+              <tr><th>Tipo</th><th class="text-end">Qtd</th><th>Proporção</th></tr>
+            </thead>
+            <tbody>${byTypeRows || '<tr><td colspan="3" class="text-muted text-center">—</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="col-md-5">
+          <p class="fw-semibold small mb-2"><i class="bi bi-hash me-1 text-muted"></i>Por Event ID</p>
+          <table class="table table-sm table-hover align-middle" style="font-size:.82rem">
+            <thead class="table-light">
+              <tr><th>Event ID</th><th class="text-end">Qtd</th></tr>
+            </thead>
+            <tbody>${byEidRows || '<tr><td colspan="2" class="text-muted text-center">—</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Último upload -->
+      ${uploadHtml}
+
+    </div>
+  </div>`;
+}
+
+async function runDiag() {
+  const clientId = document.getElementById('selClient').value;
+  const params   = clientId ? `?client_id=${clientId}` : '';
+
+  document.getElementById('resultDiv').innerHTML = '';
+  document.getElementById('loadingDiv').classList.remove('d-none');
+
+  try {
+    const resp = await fetch('/api/admin/audit-diagnostic' + params);
+    const data = await resp.json();
+    document.getElementById('loadingDiv').classList.add('d-none');
+
+    const clients = data.clients || [];
+    if (!clients.length) {
+      document.getElementById('resultDiv').innerHTML = `
+        <div class="alert alert-info">
+          <i class="bi bi-info-circle me-2"></i>Nenhum cliente encontrado.
+        </div>`;
+      return;
+    }
+
+    // Resumo global
+    const totalAll  = clients.reduce((s, c) => s + c.total, 0);
+    const withAudit = clients.filter(c => c.total > 0).length;
+    const summary = `
+    <div class="alert alert-light border mb-4">
+      <div class="row g-3">
+        <div class="col-md-4 text-center">
+          <div class="fw-bold fs-4 text-success">${fmt(totalAll)}</div>
+          <div class="small text-muted">Total de eventos de auditoria</div>
+        </div>
+        <div class="col-md-4 text-center">
+          <div class="fw-bold fs-4">${withAudit} / ${clients.length}</div>
+          <div class="small text-muted">Clientes com dados de auditoria</div>
+        </div>
+        <div class="col-md-4 text-center">
+          <div class="fw-bold fs-4">${clients.length > 0 ? fmt(Math.round(totalAll/Math.max(withAudit,1))) : 0}</div>
+          <div class="small text-muted">Média por cliente</div>
+        </div>
+      </div>
+    </div>`;
+
+    document.getElementById('resultDiv').innerHTML =
+      summary + clients.map(renderClient).join('');
+
+  } catch(e) {
+    document.getElementById('loadingDiv').classList.add('d-none');
+    document.getElementById('resultDiv').innerHTML = `
+      <div class="alert alert-danger">Erro ao executar diagnóstico: ${esc(String(e))}</div>`;
+  }
+}
+
+document.getElementById('btnDiag').addEventListener('click', runDiag);
+
+// Auto-run ao carregar
+runDiag();
+</script>
+{% endblock %}

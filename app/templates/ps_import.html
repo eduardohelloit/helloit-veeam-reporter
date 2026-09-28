@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Importar PowerShell — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-cloud-arrow-up" style="color:var(--brand-primary)"></i>
+      Importar PowerShell
+    </h4>
+    <p class="text-muted small mb-0">
+      Envie um ou mais NDJSON de coletor — o tipo é detectado automaticamente
+      (Config de Rotinas, Backups em Disco, Capacidade, Performance, Offload).
+    </p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="/import/history">
+    <i class="bi bi-clock-history me-1"></i>Histórico
+  </a>
+</div>
+
+{% if result %}
+<div class="card shadow-sm mb-3"><div class="card-body">
+  <h6 class="fw-bold mb-3">Resultado da detecção</h6>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead class="table-light"><tr><th>Arquivo</th><th>Tipo detectado</th><th>Situação</th></tr></thead>
+      <tbody>
+        {% for r in result %}
+        <tr>
+          <td class="small">{{ r.file }}</td>
+          <td>{% if r.type %}<span class="badge bg-primary-subtle text-primary-emphasis border">{{ r.type }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="small">
+            {% if r.ok %}<span class="text-success"><i class="bi bi-check-circle me-1"></i>Enviado para processamento</span>
+            {% else %}<span class="text-danger"><i class="bi bi-x-circle me-1"></i>{{ r.msg }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <a href="/import/history" class="btn btn-primary btn-sm mt-3">
+    <i class="bi bi-clock-history me-1"></i>Acompanhar no histórico
+  </a>
+</div></div>
+{% endif %}
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <form method="post" action="/import/powershell" enctype="multipart/form-data">
+      <div class="row g-3">
+        <div class="col-md-5">
+          <label class="form-label form-label-sm text-muted">Cliente</label>
+          <select name="client_id" class="form-select" required>
+            <option value="">Selecione o cliente...</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-7">
+          <label class="form-label form-label-sm text-muted">Arquivos NDJSON (pode selecionar vários)</label>
+          <input type="file" name="files" class="form-control" accept=".ndjson,.json,.txt" multiple required>
+          <div class="form-text">
+            Backups em Disco: envie o <code>collect_disk_backups</code> e o
+            <code>collect_repo_capacity</code> juntos — entram como um import só.
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary mt-3"><i class="bi bi-upload me-1"></i>Importar</button>
+    </form>
+  </div>
+</div>
+
+<div class="alert alert-light border py-2 small mt-3">
+  <i class="bi bi-info-circle me-1"></i>
+  A detecção usa o marcador <code>collection_type</code> (coletores atualizados) ou,
+  na falta dele, a assinatura de campos do arquivo. Arquivos não reconhecidos são
+  apenas sinalizados — nada é importado errado.
+</div>
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Histórico de Importações de Disco — Veeam Reporter{% endblock %}
+
+{% block content %}
+{% macro client_name(cid) %}
+  {%- set ns = namespace(v='—') -%}
+  {%- for c in clients -%}
+    {%- if c.id == cid -%}{%- set ns.v = c.name -%}{%- endif -%}
+  {%- endfor -%}
+  {{- ns.v -}}
+{% endmacro %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-clock-history me-2"></i>Histórico de Importações — Backups em Disco
+    </h2>
+    <p class="page-subtitle mb-0">Todas as cargas de pontos de restauração físicos e capacidade de repositório.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/disk/import" class="btn btn-primary btn-sm">
+      <i class="bi bi-upload me-1"></i>Nova importação
+    </a>
+  </div>
+</div>
+
+<!-- Filtro por cliente -->
+{% if clients %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="d-flex align-items-center gap-2 flex-wrap">
+      <label class="small fw-semibold text-muted flex-shrink-0">
+        <i class="bi bi-funnel me-1"></i>Filtrar por cliente:
+      </label>
+      <select name="client_id" class="form-select form-select-sm" style="max-width:280px"
+              onchange="this.form.submit()">
+        <option value="">Todos os clientes</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>
+          {{ c.name }}
+        </option>
+        {% endfor %}
+      </select>
+      {% if selected_client_id %}
+      <a href="/disk/history" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-x me-1"></i>Limpar
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if imports %}
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>Data</th>
+          <th>Cliente</th>
+          <th>Arquivo(s)</th>
+          <th class="text-center">Status</th>
+          <th class="text-center">Pontos</th>
+          <th class="text-center">Extents</th>
+          <th class="text-center">Fator</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for imp in imports %}
+        <tr>
+          <td class="small text-muted">
+            {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+            {% if imp.uploaded_by %}
+            <br><span class="text-muted">por {{ imp.uploaded_by }}</span>
+            {% endif %}
+          </td>
+          <td class="fw-semibold">
+            <i class="bi bi-building me-1 text-muted"></i>
+            {{ client_name(imp.client_id) }}
+          </td>
+          <td class="small text-muted">
+            <i class="bi bi-file-earmark-text me-1"></i>{{ imp.disk_filename or '—' }}
+            {% if imp.capacity_filename %}
+            <br><i class="bi bi-file-earmark-text me-1"></i>{{ imp.capacity_filename }}
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if imp.status == 'completed' %}
+            <span class="badge bg-success">Concluído</span>
+            {% elif imp.status == 'failed' %}
+            <span class="badge bg-danger" title="{{ imp.status_message }}">Erro</span>
+            {% else %}
+            <span class="badge bg-warning text-dark">Processando</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            <span class="text-success fw-semibold">
+              +{{ (imp.inserted_points or 0) | format_number }}
+            </span>
+            {% if imp.duplicate_points %}
+            <br><span class="text-muted small">{{ (imp.duplicate_points or 0) | format_number }} dup.</span>
+            {% endif %}
+          </td>
+          <td class="text-center">{{ imp.extents_count or 0 }}</td>
+          <td class="text-center">
+            {% if imp.calib_factor %}
+            {{ '%.2f' | format(imp.calib_factor) }}x
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              {% if imp.status == 'completed' %}
+              <a href="/disk/{{ imp.id }}/summary" class="btn btn-outline-primary btn-sm py-0"
+                 title="Ver resumo">
+                <i class="bi bi-list-check"></i>
+              </a>
+              {% elif imp.status == 'processing' %}
+              <a href="/disk/processing/{{ imp.id }}" class="btn btn-outline-warning btn-sm py-0"
+                 title="Acompanhar processamento">
+                <i class="bi bi-hourglass-split"></i>
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  Nenhuma importação de backups em disco encontrada.
+  <a href="/disk/import" class="alert-link">Faça o upload</a> dos arquivos NDJSON para começar.
+</div>
+{% endif %}
+
+{% endblock %}

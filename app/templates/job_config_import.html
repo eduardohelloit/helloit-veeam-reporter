@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Importar Auditoria de Configuração — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <h2 class="page-title mb-1">
+      <i class="bi bi-gear-wide-connected me-2"></i>Importar Auditoria de Configuração
+    </h2>
+    <p class="page-subtitle mb-4">
+      Faça o upload do arquivo <strong>.ndjson</strong> exportado por
+      <code>collect_job_config.ps1</code>. Cada linha é o snapshot de configuração de uma rotina
+      (schedule, repositório, proxy, Application-Aware, SQL Transaction Log, retenção, objetos).
+      Duplicatas são ignoradas automaticamente.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-file-earmark-arrow-up me-2"></i>Carregar arquivo de configuração
+      </div>
+      <div class="card-body">
+        <form action="/job-config/import" method="post" enctype="multipart/form-data" id="configForm">
+
+          <div class="mb-4">
+            <label for="fileInput" class="form-label fw-semibold">
+              Arquivo NDJSON <span class="text-danger">*</span>
+            </label>
+            <input class="form-control" type="file" id="fileInput" name="file"
+                   accept=".ndjson" required>
+            <div class="form-text">
+              Arquivo gerado por <code>collect_job_config.ps1</code> (modo <code>$CollectAllJobs=$true</code>).
+              Uma linha por rotina. Cargas do mesmo cliente acumulam — a tela exibirá o snapshot mais recente de cada rotina.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="client_id" class="form-label fw-semibold">
+              Cliente <span class="text-danger">*</span>
+            </label>
+            {% if clients %}
+            <select class="form-select" id="client_id" name="client_id" required>
+              <option value="">— Selecione o cliente —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.description %} — {{ c.description }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <div class="alert alert-warning py-2 mb-0">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              Nenhum cliente cadastrado.
+              <a href="/clients" class="alert-link">Cadastre um cliente</a> antes de importar.
+            </div>
+            <input type="hidden" name="client_id" value="0">
+            {% endif %}
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn"
+                    {% if not clients %}disabled{% endif %}>
+              <i class="bi bi-play-circle me-2"></i>Iniciar Importação
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card border-info mb-4">
+      <div class="card-header bg-info text-white fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-info-circle me-2"></i>Como gerar o arquivo NDJSON</span>
+        <button type="button" class="btn btn-light btn-sm"
+                onclick="showCollector('config','Coletor de Configuração de Rotinas — collect_job_config.ps1')">
+          <i class="bi bi-file-earmark-code me-1"></i>Ver / copiar script
+        </button>
+      </div>
+      <div class="card-body small">
+        <ol class="mb-0">
+          <li>No servidor VBR, abra o <strong>PowerShell</strong> como administrador Veeam.</li>
+          <li>Execute <code>scripts/collectors/collect_job_config.ps1</code> (padrão: coleta todas as rotinas).</li>
+          <li>O script coleta configuração de cada rotina: schedule, repo, proxy, VSS, SQL tx log, retenção e objetos.</li>
+          <li>Gera <code>job_config_audit_ALL_YYYYMMDD_HHMMSS.ndjson</code> — uma rotina por linha.</li>
+          <li>Faça o upload nesta tela. O cliente deve corresponder ao ambiente VBR.</li>
+        </ol>
+      </div>
+    </div>
+
+    {% if imports %}
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-2"></i>Importações recentes</span>
+        <a href="/job-config/history" class="btn btn-outline-secondary btn-sm">Ver todas</a>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for imp in imports %}
+        <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+          <div>
+            <i class="bi bi-building me-2 text-muted"></i>
+            <strong>{{ imp.client.name if imp.client else '—' }}</strong>
+            <span class="text-muted ms-2 small">{{ imp.original_filename }}</span>
+          </div>
+          <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            {% if imp.status == 'completed' %}
+              <span class="badge bg-success">+{{ (imp.inserted_jobs or 0)|format_number }} rotinas</span>
+              {% if imp.duplicate_jobs %}
+              <span class="badge bg-secondary">{{ imp.duplicate_jobs|format_number }} dup.</span>
+              {% endif %}
+              <a href="/job-config/{{ imp.id }}/summary" class="btn btn-outline-primary btn-sm py-0">
+                <i class="bi bi-list-check me-1"></i>Resumo
+              </a>
+            {% elif imp.status == 'failed' %}
+              <span class="badge bg-danger">Erro</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Processando...</span>
+              <a href="/job-config/processing/{{ imp.id }}" class="btn btn-outline-warning btn-sm py-0">
+                <i class="bi bi-hourglass-split"></i>
+              </a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% include '_collector_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('configForm').addEventListener('submit', function () {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando arquivo...';
+  });
+</script>
+{% endblock %}

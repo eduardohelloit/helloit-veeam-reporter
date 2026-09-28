@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Importar Backups em Disco — Veeam Reporter{% endblock %}
+
+{% block content %}
+{% macro client_name(cid) %}
+  {%- set ns = namespace(v='—') -%}
+  {%- for c in clients -%}
+    {%- if c.id == cid -%}{%- set ns.v = c.name -%}{%- endif -%}
+  {%- endfor -%}
+  {{- ns.v -}}
+{% endmacro %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+
+    <h2 class="page-title mb-1">
+      <i class="bi bi-hdd-stack-fill me-2"></i>Importar Backups em Disco
+    </h2>
+    <p class="page-subtitle mb-4">
+      Faça o upload dos arquivos <strong>.ndjson</strong> exportados pelos coletores PowerShell
+      <code>collect_disk_backups.ps1</code> (pontos de restauração físicos) e, opcionalmente,
+      <code>collect_repo_capacity.ps1</code> (capacidade dos repositórios, usada para calcular o
+      fator de calibração lógico → real). Os dados são adicionados à base do cliente — duplicatas
+      são ignoradas automaticamente.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-file-earmark-arrow-up me-2"></i>Carregar arquivos de disco
+      </div>
+      <div class="card-body">
+        <form action="/disk/import" method="post" enctype="multipart/form-data" id="diskForm">
+
+          <div class="mb-4">
+            <label for="diskFileInput" class="form-label fw-semibold">
+              Arquivo de disco <span class="text-danger">*</span>
+            </label>
+            <input class="form-control" type="file" id="diskFileInput" name="disk_file"
+                   accept=".ndjson" required>
+            <div class="form-text">
+              Arquivo gerado por <code>collect_disk_backups.ps1</code> — um ponto de restauração
+              físico por linha. Uploads do mesmo cliente acumulam; duplicatas (por
+              <code>rp_id</code>) são ignoradas.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="capacityFileInput" class="form-label fw-semibold">
+              Arquivo de capacidade <span class="text-muted small">(opcional)</span>
+            </label>
+            <input class="form-control" type="file" id="capacityFileInput" name="capacity_file"
+                   accept=".ndjson">
+            <div class="form-text">
+              Arquivo gerado por <code>collect_repo_capacity.ps1</code> — capacidade total/livre/usada
+              de cada repositório (Performance, Capacity, Archive, Standalone). Sem este arquivo,
+              o "real" calibrado não pode ser calculado.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="client_id" class="form-label fw-semibold">
+              Cliente <span class="text-danger">*</span>
+            </label>
+            {% if clients %}
+            <select class="form-select" id="client_id" name="client_id" required>
+              <option value="">— Selecione o cliente —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.description %} — {{ c.description }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">
+              Cliente não cadastrado?
+              <a href="/clients" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Cadastrar agora</a>
+              e volte a esta tela.
+            </div>
+            {% else %}
+            <div class="alert alert-warning py-2 mb-0">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              Nenhum cliente cadastrado.
+              <a href="/clients" class="alert-link">Cadastre um cliente</a> antes de importar.
+            </div>
+            <input type="hidden" name="client_id" value="0">
+            {% endif %}
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn"
+                    {% if not clients %}disabled{% endif %}>
+              <i class="bi bi-play-circle me-2"></i>Iniciar Importação
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Como gerar os arquivos -->
+    <div class="card border-info mb-4">
+      <div class="card-header bg-info text-white fw-semibold">
+        <i class="bi bi-info-circle me-2"></i>Como gerar os arquivos NDJSON
+      </div>
+      <div class="card-body small">
+        <ol class="mb-0">
+          <li>No servidor VBR, abra o <strong>PowerShell</strong> com permissões de administrador.</li>
+          <li>Execute <code>scripts/collectors/collect_disk_backups.ps1</code> para gerar o arquivo
+              de pontos de restauração físicos (<code>disk_backups_YYYYMMDD_HHMMSS.ndjson</code>).</li>
+          <li>Execute também <code>scripts/collectors/collect_repo_capacity.ps1</code> (opcional, mas
+              recomendado) para gerar o arquivo de capacidade dos repositórios
+              (<code>repo_capacity_YYYYMMDD_HHMMSS.ndjson</code>).</li>
+          <li>Faça o upload dos dois arquivos nesta tela — o período coletado é detectado
+              automaticamente.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Importações recentes -->
+    {% if imports %}
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-2"></i>Importações recentes</span>
+        <a href="/disk/history" class="btn btn-outline-secondary btn-sm">Ver todas</a>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for imp in imports %}
+        <div class="list-group-item d-flex justify-content-between align-items-center gap-2 flex-wrap">
+          <div>
+            <i class="bi bi-building me-2 text-muted"></i>
+            <strong>{{ client_name(imp.client_id) }}</strong>
+            <span class="text-muted ms-2 small">
+              {{ imp.disk_filename or '—' }}
+              {% if imp.capacity_filename %}+ {{ imp.capacity_filename }}{% endif %}
+            </span>
+          </div>
+          <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            {% if imp.status == 'completed' %}
+              <span class="badge bg-success">
+                +{{ (imp.inserted_points or 0) | format_number }} pontos
+              </span>
+              {% if imp.duplicate_points %}
+              <span class="badge bg-secondary">{{ imp.duplicate_points | format_number }} dup.</span>
+              {% endif %}
+              <a href="/disk/{{ imp.id }}/summary" class="btn btn-outline-primary btn-sm py-0">
+                <i class="bi bi-list-check me-1"></i>Resumo
+              </a>
+            {% elif imp.status == 'failed' %}
+              <span class="badge bg-danger" title="{{ imp.status_message }}">Erro</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Processando...</span>
+              <a href="/disk/processing/{{ imp.id }}" class="btn btn-outline-warning btn-sm py-0">
+                <i class="bi bi-hourglass-split"></i>
+              </a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('diskForm').addEventListener('submit', function () {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando arquivos...';
+  });
+</script>
+{% endblock %}

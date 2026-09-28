@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Resumo da Importação de Disco — Veeam Reporter{% endblock %}
+
+{% block content %}
+{% macro fmt_b(n) %}
+  {%- if n is none -%}
+  —
+  {%- elif n >= 1024**4 -%}
+  {{ (n / 1024**4) | round(2) }} TB
+  {%- elif n >= 1024**3 -%}
+  {{ (n / 1024**3) | round(2) }} GB
+  {%- elif n >= 1024**2 -%}
+  {{ (n / 1024**2) | round(1) }} MB
+  {%- else -%}
+  {{ n }} B
+  {%- endif -%}
+{% endmacro %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <h2 class="page-title mb-0">
+        {% if imp.status == 'completed' %}
+        <i class="bi bi-check-circle-fill text-success me-2"></i>Importação concluída
+        {% else %}
+        <i class="bi bi-x-circle-fill text-danger me-2"></i>Erro na importação
+        {% endif %}
+      </h2>
+      <div class="d-flex gap-2">
+        <a href="/disk/import" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-upload me-1"></i>Nova importação
+        </a>
+        <a href="/disk/history" class="btn btn-outline-primary btn-sm">
+          <i class="bi bi-clock-history me-1"></i>Histórico
+        </a>
+        {% if imp.status == 'completed' %}
+        <a href="/analytics/disk?client_id={{ imp.client_id }}" class="btn btn-outline-success btn-sm">
+          <i class="bi bi-hdd me-1"></i>Ver Backups em Disco
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Detalhes da carga -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle me-2 text-primary"></i>Detalhes da carga
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="small text-muted">Cliente</div>
+            <div class="fw-semibold">{{ client.name if client else '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Importado em</div>
+            <div class="fw-semibold">
+              {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+              {% if imp.uploaded_by %}
+              <span class="text-muted small">por {{ imp.uploaded_by }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Arquivo de disco</div>
+            <div class="fw-semibold">
+              <i class="bi bi-file-earmark-text me-1 text-muted"></i>{{ imp.disk_filename or '—' }}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Arquivo de capacidade</div>
+            <div class="fw-semibold">
+              {% if imp.capacity_filename %}
+              <i class="bi bi-file-earmark-text me-1 text-muted"></i>{{ imp.capacity_filename }}
+              {% else %}
+              <span class="text-muted">Não enviado</span>
+              {% endif %}
+            </div>
+          </div>
+          {% if imp.min_point_at and imp.max_point_at %}
+          <div class="col-12">
+            <div class="small text-muted">Período detectado nos pontos de restauração</div>
+            <div class="fw-semibold">
+              <i class="bi bi-calendar-range me-1 text-primary"></i>
+              {{ imp.min_point_at.strftime('%d/%m/%Y') }}
+              → {{ imp.max_point_at.strftime('%d/%m/%Y') }}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-primary">{{ (imp.total_lines or 0) | format_number }}</div>
+            <div class="small text-muted">Linhas lidas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-success">{{ (imp.inserted_points or 0) | format_number }}</div>
+            <div class="small text-muted">Pontos inseridos</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-secondary bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-secondary">{{ (imp.duplicate_points or 0) | format_number }}</div>
+            <div class="small text-muted">Duplicatas ignoradas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-warning bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-warning">{{ (imp.failed_lines or 0) | format_number }}</div>
+            <div class="small text-muted">Linhas com falha</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Capacidade / calibração -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-4">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-4 fw-bold">{{ imp.extents_count or 0 }}</div>
+            <div class="small text-muted">Extents de repositório</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-4 fw-bold">{{ fmt_b(imp.logical_bytes) }}</div>
+            <div class="small text-muted">Total lógico</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            {% if imp.calib_factor %}
+            <div class="fs-4 fw-bold text-info">{{ '%.2f' | format(imp.calib_factor) }}x</div>
+            <div class="small text-muted">Fator de calibração ({{ fmt_b(imp.real_used_bytes) }} real)</div>
+            {% else %}
+            <div class="fs-4 fw-bold text-muted">—</div>
+            <div class="small text-muted">Fator de calibração indisponível</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if imp.status_message %}
+    <div class="alert {% if imp.status == 'completed' %}alert-info{% else %}alert-danger{% endif %} small mb-0">
+      <i class="bi bi-{% if imp.status == 'completed' %}lightbulb{% else %}exclamation-triangle{% endif %} me-2"></i>
+      {{ imp.status_message }}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

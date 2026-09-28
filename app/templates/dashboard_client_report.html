@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Relatório de Cliente — HelloIT{% endblock %}
+
+{% block content %}
+
+<!-- ── Page header ─────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-file-earmark-word me-2"></i>Relatório de Cliente (Rotina)
+  </h2>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card mb-3 shadow-sm">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Cliente / Ambiente</label>
+        <select class="form-select form-select-sm" id="selClient" style="min-width:190px">
+          <option value="">— Selecione —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="form-label small mb-0 fw-semibold">Rotinas de Backup (selecione uma ou mais)</label>
+          <span class="small">
+            <a href="#" id="lnkRoutineAll" class="link-primary text-decoration-none">Marcar todas</a>
+            <span class="text-muted">|</span>
+            <a href="#" id="lnkRoutineNone" class="link-primary text-decoration-none">Limpar</a>
+            <span class="text-muted ms-1" id="routineCount">0 selecionada(s)</span>
+          </span>
+        </div>
+        <div class="border rounded p-2" id="routineBox"
+             style="max-height:180px; overflow-y:auto; min-width:340px; background:var(--bs-body-bg,#fff)">
+          <div class="text-muted small" id="routinePlaceholder">Selecione um cliente para listar as rotinas.</div>
+        </div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Nome do Report</label>
+        <input type="text" class="form-control form-control-sm" id="inpReportName"
+               placeholder="Ex.: Safilo Ltda" style="min-width:180px">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">De</label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Até</label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1 fw-semibold">Classificação</label>
+        <select class="form-select form-select-sm" id="selTlp">
+          <option value="CLEAR">TLP:CLEAR</option>
+          <option value="GREEN">TLP:GREEN</option>
+          <option value="AMBER" selected>TLP:AMBER</option>
+          <option value="RED">TLP:RED</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm" id="btnGenerate" disabled>
+          <i class="bi bi-file-earmark-word me-1"></i>Gerar Word
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Hint ────────────────────────────────────────────────────────────────── -->
+<div id="hintBox" class="text-muted small">
+  <i class="bi bi-info-circle me-1"></i>
+  O documento Word traz: sumário executivo, configuração de proteção (retenção/imutabilidade/schedule),
+  detalhe por VM com RPO observado, e falhas do período — marcado com a classificação TLP escolhida.
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+'use strict';
+
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+function firstOfLastMonthStr() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().split('T')[0];
+}
+function lastOfLastMonthStr() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 0).toISOString().split('T')[0];
+}
+function setDefaultDates() {
+  document.getElementById('dateStart').value = firstOfLastMonthStr();
+  document.getElementById('dateEnd').value   = lastOfLastMonthStr();
+}
+
+const escHtml = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function checkFormValid() {
+  const clientId    = document.getElementById('selClient').value;
+  const routineChks = document.querySelectorAll('.routine-chk:checked');
+  const reportName  = document.getElementById('inpReportName').value.trim();
+  const dateStart   = document.getElementById('dateStart').value;
+  const dateEnd     = document.getElementById('dateEnd').value;
+
+  const countEl = document.getElementById('routineCount');
+  if (countEl) countEl.textContent = routineChks.length + ' selecionada(s)';
+
+  document.getElementById('btnGenerate').disabled =
+    !(clientId && routineChks.length > 0 && reportName && dateStart && dateEnd);
+}
+
+async function loadRoutines() {
+  const clientId = document.getElementById('selClient').value;
+  const routineBox = document.getElementById('routineBox');
+
+  if (!clientId) {
+    routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Selecione um cliente para listar as rotinas.</div>';
+    checkFormValid();
+    return;
+  }
+
+  routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Carregando rotinas...</div>';
+
+  try {
+    const resp = await fetch('/api/client-report/routines?client_id=' + encodeURIComponent(clientId));
+    if (!resp.ok) {
+      routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Erro ao carregar rotinas.</div>';
+      checkFormValid();
+      return;
+    }
+    const data = await resp.json();
+    const items = data.items || [];
+    if (items.length === 0) {
+      routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Nenhuma rotina encontrada para este cliente.</div>';
+    } else {
+      routineBox.innerHTML = items.map(it =>
+        `<label class="d-block small"><input type="checkbox" class="form-check-input me-1 routine-chk" value="${escHtml(it.job_name)}"> ${escHtml(it.job_name)} <span class="text-muted">(${it.executions} execuções — última: ${escHtml(it.last_exec)})</span></label>`
+      ).join('');
+    }
+  } catch (err) {
+    console.error('loadRoutines error:', err);
+    routineBox.innerHTML = '<div class="text-muted small" id="routinePlaceholder">Erro ao carregar rotinas.</div>';
+  } finally {
+    checkFormValid();
+  }
+}
+
+async function generate() {
+  const btn = document.getElementById('btnGenerate');
+  const originalHtml = btn.innerHTML;
+
+  const payload = {
+    client_id:   parseInt(document.getElementById('selClient').value, 10),
+    job_names:   Array.from(document.querySelectorAll('.routine-chk:checked')).map(c => c.value),
+    report_name: document.getElementById('inpReportName').value.trim(),
+    tlp:         document.getElementById('selTlp').value,
+    date_start:  document.getElementById('dateStart').value,
+    date_end:    document.getElementById('dateEnd').value,
+  };
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gerando...';
+
+  try {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const resp = await fetch('/api/export/client-report-docx', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      alert('Erro ao gerar Word: ' + (text || resp.statusText));
+      return;
+    }
+
+    const blob = await resp.blob();
+    const disposition = resp.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : 'Relatorio_Cliente.docx';
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Erro inesperado: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    checkFormValid();
+  }
+}
+
+document.getElementById('selClient').addEventListener('change', loadRoutines);
+['inpReportName', 'dateStart', 'dateEnd'].forEach(id => {
+  document.getElementById(id).addEventListener('input', checkFormValid);
+  document.getElementById(id).addEventListener('change', checkFormValid);
+});
+document.getElementById('routineBox').addEventListener('change', (e) => {
+  if (e.target && e.target.classList.contains('routine-chk')) checkFormValid();
+});
+document.getElementById('lnkRoutineAll').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.routine-chk').forEach(c => { c.checked = true; });
+  checkFormValid();
+});
+document.getElementById('lnkRoutineNone').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.routine-chk').forEach(c => { c.checked = false; });
+  checkFormValid();
+});
+document.getElementById('btnGenerate').addEventListener('click', generate);
+
+setDefaultDates();
+checkFormValid();
+</script>
+{% endblock %}

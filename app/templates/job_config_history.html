@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Histórico de Importações — Config Rotinas{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="page-title mb-0">
+    <i class="bi bi-clock-history me-2"></i>Histórico — Auditoria de Configuração
+  </h2>
+  <a href="/job-config/import" class="btn btn-primary btn-sm">
+    <i class="bi bi-upload me-1"></i>Nova importação
+  </a>
+</div>
+
+<!-- Filtro de cliente -->
+<form method="get" class="row g-2 mb-4 align-items-end">
+  <div class="col-auto">
+    <label class="form-label fw-semibold small mb-1">Filtrar por cliente</label>
+    <select name="client_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Todos os clientes</option>
+      {% for c in clients %}
+      <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if selected_client_id %}
+  <div class="col-auto">
+    <a href="/job-config/history" class="btn btn-outline-secondary btn-sm">Limpar filtro</a>
+  </div>
+  {% endif %}
+</form>
+
+{% if imports %}
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>#</th>
+          <th>Cliente</th>
+          <th>Arquivo</th>
+          <th>VBR / Script</th>
+          <th>Rotinas novas</th>
+          <th>Dup.</th>
+          <th>Objetos</th>
+          <th>Status</th>
+          <th>Importado em</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for imp in imports %}
+        <tr>
+          <td class="text-muted small">{{ imp.id }}</td>
+          <td>{{ imp.client.name if imp.client else '—' }}</td>
+          <td class="small text-truncate" style="max-width:200px;" title="{{ imp.original_filename }}">
+            {{ imp.original_filename }}
+          </td>
+          <td class="small text-muted">
+            {{ imp.vbr_server or '—' }}
+            {% if imp.script_version %}<span class="badge bg-secondary ms-1">v{{ imp.script_version }}</span>{% endif %}
+          </td>
+          <td class="fw-semibold text-success">{{ (imp.inserted_jobs or 0)|format_number }}</td>
+          <td class="text-muted small">{{ (imp.duplicate_jobs or 0)|format_number }}</td>
+          <td class="text-muted small">{{ (imp.inserted_objects or 0)|format_number }}</td>
+          <td>
+            {% if imp.status == 'completed' %}
+              <span class="badge bg-success">Concluído</span>
+            {% elif imp.status == 'failed' %}
+              <span class="badge bg-danger">Erro</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Processando</span>
+            {% endif %}
+          </td>
+          <td class="small text-muted">
+            {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+          </td>
+          <td>
+            {% if imp.status in ['completed', 'failed'] %}
+            <a href="/job-config/{{ imp.id }}/summary" class="btn btn-outline-secondary btn-sm py-0">
+              <i class="bi bi-list-check"></i>
+            </a>
+            {% else %}
+            <a href="/job-config/processing/{{ imp.id }}" class="btn btn-outline-warning btn-sm py-0">
+              <i class="bi bi-hourglass-split"></i>
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  Nenhuma importação encontrada.
+  <a href="/job-config/import" class="alert-link">Importe o primeiro arquivo</a>.
+</div>
+{% endif %}
+{% endblock %}

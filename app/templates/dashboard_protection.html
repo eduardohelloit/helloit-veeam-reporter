@@ -1,0 +1,865 @@
+{% extends "base.html" %}
+{% block title %}Proteção de VMs — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-hdd-network me-2"></i>Proteção de VMs
+      <span id="headerClientName" class="text-muted fw-normal fs-5 ms-2 d-none">
+        — <span id="headerClientNameText"></span>
+      </span>
+    </h2>
+    <p class="page-subtitle mb-0">
+      Evolução do parque de máquinas virtuais protegidas ao longo do tempo
+    </p>
+  </div>
+  <!-- Botão de exportação PPTX — aparece após consultar -->
+  <div class="d-none" id="headerExportBtns">
+    <button class="btn btn-sm btn-outline-danger" id="btnExportProtPPTX">
+      <i class="bi bi-file-earmark-ppt me-1"></i>Exportar PowerPoint
+    </button>
+  </div>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-building me-1 text-muted"></i>Cliente
+        </label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>De
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>Até
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-range me-1 text-muted"></i>Agrupamento
+        </label>
+        <select class="form-select form-select-sm" id="selPeriod">
+          <option value="week">Semanal</option>
+          <option value="fortnight" selected>Quinzenal</option>
+          <option value="month">Mensal</option>
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-3 d-flex gap-1">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Limpar filtros">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado inicial ───────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-funnel fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione os filtros e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<!-- ── Loading ─────────────────────────────────────────────────────────────── -->
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Calculando dados de proteção...</p>
+</div>
+
+<!-- ── Empty state ─────────────────────────────────────────────────────────── -->
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-3">
+    Nenhum dado encontrado para o período selecionado.<br>
+    <a href="/import" class="text-decoration-none">Faça um upload</a> para começar.
+  </p>
+</div>
+
+<!-- ── Content ─────────────────────────────────────────────────────────────── -->
+<div id="protContent">
+
+  <!-- KPI cards -->
+  <div class="row g-2 mb-3">
+    <!-- VMs protegidas -->
+    <div class="col-12 col-md-4">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #0D6EFD">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-hdd-network me-1 text-primary"></i>VMs Protegidas
+          </div>
+          <div class="kpi-number text-primary" id="kpiVMs">—</div>
+          <div class="text-muted small mt-1">máquinas com backup no período</div>
+        </div>
+      </div>
+    </div>
+    <!-- Com transaction log -->
+    <div class="col-12 col-md-4">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #FFC107">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-journal-code me-1 text-warning"></i>Com Transaction Log
+          </div>
+          <div class="kpi-number text-warning" id="kpiLogVMs">—</div>
+          <div class="text-muted small mt-1">VMs com backup de log ativo</div>
+          <div class="badge mt-1" style="background:#FFC107;color:#000" id="kpiLogPct">—</div>
+        </div>
+      </div>
+    </div>
+    <!-- Jobs de backup -->
+    <div class="col-12 col-md-4">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #7C3AED">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-hdd-stack me-1 text-success"></i>Jobs de Backup
+          </div>
+          <div class="kpi-number text-success" id="kpiJobs">—</div>
+          <div class="text-muted small mt-1">rotinas de backup configuradas</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Evolution chart -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+      <span>
+        <i class="bi bi-graph-up-arrow me-2 text-primary"></i>
+        Evolução de VMs Protegidas por Período
+      </span>
+      <span class="text-muted small fw-normal" id="chartSubtitle"></span>
+    </div>
+    <div class="card-body" style="position:relative; height:320px;">
+      <canvas id="chartEvolution"></canvas>
+    </div>
+  </div>
+
+  <!-- Period detail table -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small">
+      <i class="bi bi-table me-2 text-muted"></i>Detalhe por Período
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">Período</th>
+            <th class="text-center" style="width:160px">VMs Protegidas</th>
+            <th class="text-center" style="width:160px">Com Trans. Log</th>
+            <th class="text-center" style="width:160px">Só Backup</th>
+            <th class="text-center" style="width:120px">Variação</th>
+          </tr>
+        </thead>
+        <tbody id="bodyPeriods">
+          <tr><td colspan="5" class="text-center text-muted py-3 small">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="alert alert-light border small">
+    <i class="bi bi-info-circle me-2 text-info"></i>
+    <strong>Como é calculado:</strong>
+    Cada VM protegida é contabilizada uma vez por período, independente de quantas vezes foi executada.
+    "VMs Protegidas" = VMs únicas com ao menos uma tarefa de backup (EV150) no período.
+    "Jobs de Backup" = rotinas de backup únicas concluídas (EV190).
+  </div>
+
+  <!-- ── VMs consideradas no período ──────────────────────────────────────── -->
+  <div class="card shadow-sm mb-3">
+    <!-- Cabeçalho recolhível -->
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
+         style="cursor:pointer" id="vmListToggle">
+      <span class="fw-semibold small">
+        <i class="bi bi-hdd-network me-2 text-primary"></i>VMs consideradas no período
+        <span class="badge bg-primary ms-2" id="vmTotalBadge" style="display:none">—</span>
+      </span>
+      <div class="d-flex align-items-center gap-2" onclick="event.stopPropagation()">
+        <button class="btn btn-outline-success btn-sm" id="btnExportVMs" style="display:none">
+          <i class="bi bi-file-earmark-excel me-1"></i>Exportar VMs
+        </button>
+        <i class="bi bi-chevron-down" id="vmCollapseIcon" style="transition:.2s"></i>
+      </div>
+    </div>
+
+    <!-- Corpo recolhível -->
+    <div id="vmListBody">
+      <!-- Filtros internos -->
+      <div class="px-3 py-2 border-bottom bg-light d-flex align-items-center flex-wrap gap-2">
+        <input type="text" id="vmSearch" class="form-control form-control-sm"
+               placeholder="Buscar VM…" style="width:200px" autocomplete="off">
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <span class="small text-muted me-1">Proteção:</span>
+          <button class="btn btn-sm rounded-pill vm-type-pill btn-secondary active" data-type="all"
+                  style="font-size:.72rem;padding:.18rem .65rem">Todas</button>
+          <button class="btn btn-sm rounded-pill vm-type-pill btn-outline-warning" data-type="with_log"
+                  style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-journal-code me-1"></i>Com Trans. Log</button>
+          <button class="btn btn-sm rounded-pill vm-type-pill btn-outline-secondary" data-type="without_log"
+                  style="font-size:.72rem;padding:.18rem .65rem">Sem Trans. Log</button>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <span class="small text-muted me-1">Resultado:</span>
+          <button class="btn btn-sm rounded-pill vm-result-pill btn-secondary active" data-result="all"
+                  style="font-size:.72rem;padding:.18rem .65rem">Todos</button>
+          <button class="btn btn-sm rounded-pill vm-result-pill btn-outline-danger" data-result="failed"
+                  style="font-size:.72rem;padding:.18rem .65rem">Falha</button>
+          <button class="btn btn-sm rounded-pill vm-result-pill btn-outline-warning" data-result="warning"
+                  style="font-size:.72rem;padding:.18rem .65rem">Warning</button>
+          <button class="btn btn-sm rounded-pill vm-result-pill btn-outline-success" data-result="success"
+                  style="font-size:.72rem;padding:.18rem .65rem">Sucesso</button>
+        </div>
+      </div>
+
+      <!-- Tabela -->
+      <div style="max-height:520px;overflow-y:auto">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead class="table-light sticky-top" style="font-size:.74rem">
+            <tr>
+              <th class="ps-3" style="min-width:220px">Máquina Virtual</th>
+              <th style="width:170px">Ambiente / Cliente</th>
+              <th style="width:185px">Tipo de Proteção</th>
+              <th style="width:145px">Último Backup</th>
+              <th style="width:110px">Resultado</th>
+              <th style="width:160px">Servidor VBR</th>
+              <th style="width:90px" class="text-center">Trans. Log</th>
+              <th style="width:80px" class="text-center">Execuções</th>
+              <th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody id="vmTableBody">
+            <tr><td colspan="9" class="text-center text-muted py-4 small">
+              Clique em <strong>Consultar</strong> para carregar a lista de VMs.
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Loading inline -->
+      <div id="vmLoading" class="text-center py-3 d-none">
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <span class="text-muted small ms-2">Carregando VMs…</span>
+      </div>
+
+      <!-- Paginação -->
+      <div class="card-footer py-1 px-3 d-none d-flex align-items-center justify-content-between small text-muted flex-wrap gap-2"
+           id="vmPagination">
+        <span id="vmPaginationInfo"></span>
+        <div class="d-flex align-items-center gap-2">
+          <select class="form-select form-select-sm" id="vmPageSize" style="width:auto">
+            <option value="20" selected>20 / página</option>
+            <option value="50">50 / página</option>
+            <option value="100">100 / página</option>
+          </select>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" id="btnVMFirst" title="Primeira página"><i class="bi bi-chevron-double-left"></i></button>
+            <button class="btn btn-outline-secondary" id="btnVMPrev"  title="Anterior"><i class="bi bi-chevron-left"></i></button>
+            <span class="btn btn-outline-secondary disabled px-2" id="vmPageIndicator"
+                  style="pointer-events:none;min-width:72px;text-align:center">—</span>
+            <button class="btn btn-outline-secondary" id="btnVMNext" title="Próximo"><i class="bi bi-chevron-right"></i></button>
+            <button class="btn btn-outline-secondary" id="btnVMLast" title="Última página"><i class="bi bi-chevron-double-right"></i></button>
+          </div>
+        </div>
+      </div>
+    </div><!-- /vmListBody -->
+  </div><!-- /card -->
+
+</div><!-- /protContent -->
+
+<!-- ── Modal: drill-down de execuções da VM ──────────────────────────────── -->
+<div class="modal fade" id="modalVMDetail" tabindex="-1" aria-labelledby="modalVMDetailLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold" id="modalVMDetailLabel">
+          <i class="bi bi-hdd-network me-2 text-primary"></i>Histórico de execuções — <span id="modalVMName" class="text-muted fw-normal"></span>
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="modalVMBody">
+        <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+const C = {
+  blue:    '#0D6EFD',
+  blueSoft:'rgba(13,110,253,0.15)',
+  yellow:  '#FFC107',
+  green:   '#7C3AED',
+  gray:    '#718096',
+};
+
+Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
+Chart.defaults.font.size   = 12;
+Chart.defaults.color       = '#718096';
+
+let evolutionChart = null;
+let _allReports    = [];
+
+function fmt(n) { return n.toLocaleString('pt-BR'); }
+function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
+
+// ── KPIs ─────────────────────────────────────────────────────────────────────
+function updateKPIs(k) {
+  document.getElementById('kpiVMs').textContent    = fmt(k.protected_vms);
+  document.getElementById('kpiLogVMs').textContent = fmt(k.log_vms);
+  document.getElementById('kpiJobs').textContent   = fmt(k.backup_jobs);
+  document.getElementById('kpiLogPct').textContent =
+    pct(k.log_vms, k.protected_vms) + '% das VMs protegidas';
+}
+
+// ── Evolution chart ───────────────────────────────────────────────────────────
+function renderChart(evolution) {
+  if (evolutionChart) { evolutionChart.destroy(); evolutionChart = null; }
+  if (!evolution.length) return;
+
+  const labels    = evolution.map(p => p.label);
+  const vmCounts  = evolution.map(p => p.vms);
+  const logCounts = evolution.map(p => p.log_vms);
+  const bkpCounts = evolution.map(p => p.bkp_vms);
+
+  // Subtitle: total range
+  const first = evolution[0].label.split('–')[0].trim();
+  const last  = evolution[evolution.length - 1].label.split('–').pop().trim();
+  document.getElementById('chartSubtitle').textContent = `${first} → ${last}`;
+
+  const ctx = document.getElementById('chartEvolution').getContext('2d');
+  evolutionChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Só Backup',
+          data: bkpCounts,
+          backgroundColor: C.blueSoft,
+          borderColor: C.blue,
+          borderWidth: 1.5,
+          borderRadius: 4,
+          stack: 'vms',
+        },
+        {
+          label: 'Com Trans. Log',
+          data: logCounts,
+          backgroundColor: 'rgba(255,193,7,0.35)',
+          borderColor: C.yellow,
+          borderWidth: 1.5,
+          borderRadius: 4,
+          stack: 'vms',
+        },
+        {
+          label: 'Total VMs',
+          data: vmCounts,
+          type: 'line',
+          borderColor: C.blue,
+          borderWidth: 2.5,
+          pointBackgroundColor: C.blue,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          tension: 0.3,
+          fill: false,
+          stack: undefined,
+          yAxisID: 'y',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { usePointStyle: true, padding: 16 },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(45,55,72,0.92)',
+          titleColor: '#fff',
+          bodyColor:  'rgba(255,255,255,.85)',
+          padding: 10,
+          cornerRadius: 6,
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.raw)} VMs`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          grid: { display: false },
+          ticks: { maxRotation: 30 },
+        },
+        y: {
+          stacked: false,
+          beginAtZero: true,
+          grid: { color: 'rgba(0,0,0,.06)' },
+          ticks: {
+            stepSize: 1,
+            callback: v => Number.isInteger(v) ? fmt(v) : null,
+          },
+        },
+      },
+    },
+  });
+}
+
+// ── Period detail table ───────────────────────────────────────────────────────
+function renderTable(evolution) {
+  const tbody = document.getElementById('bodyPeriods');
+  if (!evolution.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3 small">Sem dados.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = evolution.map((p, i) => {
+    const prev = i > 0 ? evolution[i - 1].vms : null;
+    let variacao = '<span class="text-muted">—</span>';
+    if (prev !== null) {
+      const diff = p.vms - prev;
+      if (diff > 0)       variacao = `<span class="text-success fw-semibold">+${fmt(diff)} ▲</span>`;
+      else if (diff < 0)  variacao = `<span class="text-danger fw-semibold">${fmt(diff)} ▼</span>`;
+      else                variacao = `<span class="text-muted">0 —</span>`;
+    }
+    return `<tr>
+      <td class="ps-3 small fw-semibold">${p.label}</td>
+      <td class="text-center">
+        <span class="badge" style="background:#0D6EFD;font-size:.85rem">${fmt(p.vms)}</span>
+      </td>
+      <td class="text-center">
+        <span class="badge bg-warning text-dark" style="font-size:.85rem">${fmt(p.log_vms)}</span>
+      </td>
+      <td class="text-center">
+        <span class="badge bg-secondary" style="font-size:.85rem">${fmt(p.bkp_vms)}</span>
+      </td>
+      <td class="text-center">${variacao}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Utilitários ───────────────────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; }
+function setDefaultDates() {
+  document.getElementById('dateStart').value = daysAgoStr(7);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+function checkPeriod() {
+  const s = document.getElementById('dateStart').value;
+  const e = document.getElementById('dateEnd').value;
+  if (!s || !e) return true;
+  const days = (new Date(e) - new Date(s)) / 86400000;
+  if (days > 90) return confirm(`Período de ${Math.round(days)} dias selecionado.\nPeríodos extensos podem demorar mais para processar.\nDeseja continuar?`);
+  return true;
+}
+
+// ── Cliente no cabeçalho ──────────────────────────────────────────────────────
+function updateClientHeader() {
+  const sel  = document.getElementById('selClient');
+  const name = sel.options[sel.selectedIndex]?.text || '';
+  const wrap = document.getElementById('headerClientName');
+  const txt  = document.getElementById('headerClientNameText');
+  if (sel.value && name && name !== 'Todos os clientes') {
+    txt.textContent = name; wrap.classList.remove('d-none');
+  } else {
+    wrap.classList.add('d-none');
+  }
+}
+
+// ── Estados visuais ───────────────────────────────────────────────────────────
+function showWaiting() {
+  document.getElementById('waitingState').classList.remove('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+  document.getElementById('protContent').classList.add('d-none');
+  document.getElementById('headerExportBtns').classList.add('d-none');
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final antes de consultar.'); return; }
+  if (!checkPeriod()) return;
+
+  const clientId = document.getElementById('selClient').value;
+  const period   = document.getElementById('selPeriod').value;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+  document.getElementById('protContent').style.opacity = '0.4';
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, period });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/protection-dashboard?' + params);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.error || 'Erro ao consultar dados.'); showWaiting(); return;
+    }
+    const data = await resp.json();
+
+    const isEmpty = data.kpis.protected_vms === 0;
+    document.getElementById('emptyState').classList.toggle('d-none', !isEmpty);
+    document.getElementById('protContent').classList.toggle('d-none', isEmpty);
+
+    if (!isEmpty) {
+      updateKPIs(data.kpis);
+      renderChart(data.evolution);
+      renderTable(data.evolution);
+      // Mostrar botão de exportação PPTX
+      document.getElementById('headerExportBtns').classList.remove('d-none');
+      // Reset VM list filters and load page 1
+      _vmTypeFilter   = 'all';
+      _vmResultFilter = 'all';
+      activatePill('vm-type-pill',   'all');
+      activatePill('vm-result-pill', 'all');
+      document.getElementById('vmSearch').value = '';
+      loadVMList(1);
+    }
+  } catch(e) {
+    console.error('Protection dashboard error:', e); showWaiting();
+  } finally {
+    document.getElementById('loadingOverlay').classList.add('d-none');
+    document.getElementById('protContent').style.opacity = '1';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VM LIST — lista auditável de VMs protegidas
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _vmPage       = 1;
+let _vmPageSize   = 20;
+let _vmTotalPages = 1;
+let _vmTypeFilter   = 'all';
+let _vmResultFilter = 'all';
+
+function fmtVm(n) { return (n ?? 0).toLocaleString('pt-BR'); }
+function escVm(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const VM_RESULT_BADGE = {
+  0: ['bg-success', 'Sucesso'],
+  1: ['bg-warning text-dark', 'Warning'],
+  2: ['bg-danger', 'Falha'],
+};
+const VM_PROT_BADGE = {
+  'Backup':              'bg-primary',
+  'Transaction Log':     'bg-warning text-dark',
+  'Backup + Trans. Log': 'bg-info text-dark',
+};
+
+// ── Collapse/expand toggle ────────────────────────────────────────────────────
+let _vmCollapsed = false;
+document.getElementById('vmListToggle').addEventListener('click', function() {
+  const body = document.getElementById('vmListBody');
+  const icon = document.getElementById('vmCollapseIcon');
+  _vmCollapsed = !_vmCollapsed;
+  body.style.display = _vmCollapsed ? 'none' : '';
+  icon.style.transform = _vmCollapsed ? 'rotate(-90deg)' : '';
+});
+
+// ── Pill helpers ──────────────────────────────────────────────────────────────
+function activatePill(group, value) {
+  const ACTIVE = {
+    'vm-type-pill':   { all: 'btn-secondary', with_log: 'btn-warning', without_log: 'btn-secondary' },
+    'vm-result-pill': { all: 'btn-secondary', failed: 'btn-danger', warning: 'btn-warning', success: 'btn-success' },
+  };
+  const OUTLINE = {
+    'vm-type-pill':   { all: 'btn-outline-secondary', with_log: 'btn-outline-warning', without_log: 'btn-outline-secondary' },
+    'vm-result-pill': { all: 'btn-outline-secondary', failed: 'btn-outline-danger', warning: 'btn-outline-warning', success: 'btn-outline-success' },
+  };
+  document.querySelectorAll('.' + group).forEach(btn => {
+    const t = btn.dataset.type || btn.dataset.result;
+    const isActive = t === value;
+    btn.className = btn.className
+      .replace(/\bbtn-(secondary|warning|danger|success|info|outline-[a-z]+)\b/g, '')
+      .replace(/\bactive\b/g, '').trim();
+    btn.classList.add(isActive ? ACTIVE[group][t] : OUTLINE[group][t]);
+    if (isActive) btn.classList.add('active');
+  });
+}
+
+// ── Render VM table ───────────────────────────────────────────────────────────
+function renderVMTable(vms) {
+  const tbody = document.getElementById('vmTableBody');
+  if (!vms.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4 small">Nenhuma VM encontrada com os filtros aplicados.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = vms.map(vm => {
+    const [resCls, resLbl] = VM_RESULT_BADGE[vm.last_result] || ['bg-secondary', vm.last_result_label];
+    const protCls          = VM_PROT_BADGE[vm.protection_type] || 'bg-secondary';
+    const logBadge         = vm.has_log
+      ? '<span class="badge bg-warning text-dark" style="font-size:.65rem"><i class="bi bi-check-lg me-1"></i>Sim</span>'
+      : '<span class="badge bg-light text-muted border" style="font-size:.65rem">Não</span>';
+
+    return `<tr>
+      <td class="ps-3 small fw-semibold text-truncate" style="max-width:220px" title="${escVm(vm.vm_name)}">${escVm(vm.vm_name)}</td>
+      <td class="small text-muted text-truncate" style="max-width:170px" title="${escVm(vm.client_name)}">${escVm(vm.client_name)}</td>
+      <td><span class="badge ${protCls}" style="font-size:.68rem">${escVm(vm.protection_type)}</span></td>
+      <td class="small">${escVm(vm.last_backup)}</td>
+      <td><span class="badge ${resCls}" style="font-size:.68rem">${resLbl}</span></td>
+      <td class="small text-muted text-truncate" style="max-width:160px" title="${escVm(vm.vbr_hostname)}">${escVm(vm.vbr_hostname)}</td>
+      <td class="text-center">${logBadge}</td>
+      <td class="text-center small fw-bold">${fmtVm(vm.exec_count)}</td>
+      <td class="text-center">
+        <button class="btn btn-link btn-sm p-0 text-muted" title="Ver execuções"
+                onclick="openVMDrilldown(${JSON.stringify(escVm(vm.vm_name))}, ${vm.client_id})">
+          <i class="bi bi-zoom-in"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────────
+function updateVMPagination(p) {
+  const div  = document.getElementById('vmPagination');
+  const info = document.getElementById('vmPaginationInfo');
+  if (!p || p.total === 0) { div.classList.add('d-none'); return; }
+  div.classList.remove('d-none');
+  const from = (p.page - 1) * p.page_size + 1;
+  const to   = Math.min(p.page * p.page_size, p.total);
+  info.textContent = `${from}–${to} de ${fmtVm(p.total)} VMs`;
+  const atFirst = p.page <= 1;
+  const atLast  = p.page >= p.total_pages;
+  document.getElementById('btnVMFirst').disabled = atFirst;
+  document.getElementById('btnVMPrev').disabled  = atFirst;
+  document.getElementById('btnVMNext').disabled  = atLast;
+  document.getElementById('btnVMLast').disabled  = atLast;
+  document.getElementById('vmPageIndicator').textContent = `${p.page} / ${p.total_pages}`;
+  _vmPage       = p.page;
+  _vmPageSize   = p.page_size;
+  _vmTotalPages = p.total_pages;
+}
+
+// ── Build VM query params ─────────────────────────────────────────────────────
+function _buildVMParams(page, pageSize) {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const clientId  = document.getElementById('selClient').value;
+  const search    = document.getElementById('vmSearch').value.trim();
+
+  const p = new URLSearchParams({
+    date_start:       dateStart,
+    date_end:         dateEnd,
+    protection_type:  _vmTypeFilter,
+    result_filter:    _vmResultFilter,
+    page,
+    page_size:        pageSize,
+  });
+  if (clientId) p.set('client_id', clientId);
+  if (search)   p.set('search', search);
+  return p;
+}
+
+// ── Load VM list ──────────────────────────────────────────────────────────────
+async function loadVMList(page) {
+  _vmPage = page;
+  const pageSize = parseInt(document.getElementById('vmPageSize').value) || 20;
+
+  document.getElementById('vmLoading').classList.remove('d-none');
+  document.getElementById('vmTableBody').style.opacity = '0.4';
+
+  try {
+    const params = _buildVMParams(page, pageSize);
+    const resp   = await fetch('/api/protection-vm-list?' + params);
+    if (!resp.ok) { console.error('VM list error'); return; }
+    const data = await resp.json();
+
+    // Update total badge
+    const badge = document.getElementById('vmTotalBadge');
+    badge.textContent = fmtVm(data.total) + ' VMs';
+    badge.style.display = '';
+
+    // Show export button
+    document.getElementById('btnExportVMs').style.display = '';
+
+    renderVMTable(data.vms || []);
+    updateVMPagination({ page: data.page, page_size: data.page_size, total: data.total, total_pages: data.total_pages });
+  } catch(e) {
+    console.error('loadVMList:', e);
+  } finally {
+    document.getElementById('vmLoading').classList.add('d-none');
+    document.getElementById('vmTableBody').style.opacity = '1';
+  }
+}
+
+// ── Drill-down modal ──────────────────────────────────────────────────────────
+async function openVMDrilldown(vmName, clientId) {
+  const modal = new bootstrap.Modal(document.getElementById('modalVMDetail'));
+  document.getElementById('modalVMName').textContent = vmName;
+  document.getElementById('modalVMBody').innerHTML =
+    '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+  modal.show();
+
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const params    = new URLSearchParams({ vm_name: vmName, date_start: dateStart, date_end: dateEnd });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/protection-vm-detail?' + params);
+    if (!resp.ok) { document.getElementById('modalVMBody').innerHTML = '<p class="text-danger p-3">Erro ao carregar.</p>'; return; }
+    const data = await resp.json();
+    const execs = data.executions || [];
+
+    if (!execs.length) {
+      document.getElementById('modalVMBody').innerHTML = '<p class="text-muted p-3 small">Nenhuma execução encontrada no período.</p>';
+      return;
+    }
+
+    const RESULT_BADGE = { 0: 'bg-success', 1: 'bg-warning text-dark', 2: 'bg-danger' };
+    const TYPE_BADGE   = { backup: 'bg-primary', log_backup: 'bg-warning text-dark' };
+
+    const rows = execs.map(e => {
+      const resCls  = RESULT_BADGE[e.result]    || 'bg-secondary';
+      const typeCls = TYPE_BADGE[e.event_category] || 'bg-secondary';
+      const msgPreview = (e.message || '').slice(0, 200);
+      return `<tr>
+        <td class="ps-3 small fw-semibold">${escVm(e.time)}</td>
+        <td><span class="badge ${typeCls}" style="font-size:.65rem">${escVm(e.type_label)}</span></td>
+        <td><span class="badge ${resCls}" style="font-size:.65rem">${escVm(e.result_label)}</span></td>
+        <td class="small text-muted">${escVm(e.vbr_hostname)}</td>
+        <td class="small text-muted" style="max-width:300px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"
+            title="${escVm(e.message)}">${escVm(msgPreview) || '—'}</td>
+        <td class="small text-muted" style="font-size:.68rem">${escVm(e.source_filename)}</td>
+        <td class="small text-muted text-center">
+          <span style="font-size:.65rem">#${escVm(String(e.upload_session_id))}</span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('modalVMBody').innerHTML = `
+      <div class="px-3 py-2 bg-light border-bottom small text-muted">
+        <i class="bi bi-list-ul me-1"></i>${fmtVm(execs.length)} execuções encontradas no período
+        ${execs.length >= 500 ? ' <span class="badge bg-warning text-dark">máx. 500 exibidas</span>' : ''}
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.76rem">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th class="ps-3" style="width:145px">Data/Hora</th>
+              <th style="width:120px">Tipo</th>
+              <th style="width:90px">Resultado</th>
+              <th style="width:140px">Servidor VBR</th>
+              <th style="min-width:200px">Mensagem</th>
+              <th style="min-width:160px">Arquivo fonte</th>
+              <th style="width:80px" class="text-center">Upload</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(err) {
+    document.getElementById('modalVMBody').innerHTML = '<p class="text-danger p-3">Erro ao carregar detalhes.</p>';
+    console.error('VM drill-down:', err);
+  }
+}
+
+// ── Search debounce ───────────────────────────────────────────────────────────
+let _vmSearchTimer = null;
+document.getElementById('vmSearch').addEventListener('input', function() {
+  clearTimeout(_vmSearchTimer);
+  _vmSearchTimer = setTimeout(() => loadVMList(1), 400);
+});
+
+// ── Pill listeners ────────────────────────────────────────────────────────────
+document.querySelectorAll('.vm-type-pill').forEach(btn => {
+  btn.addEventListener('click', function() {
+    _vmTypeFilter = this.dataset.type;
+    activatePill('vm-type-pill', _vmTypeFilter);
+    loadVMList(1);
+  });
+});
+document.querySelectorAll('.vm-result-pill').forEach(btn => {
+  btn.addEventListener('click', function() {
+    _vmResultFilter = this.dataset.result;
+    activatePill('vm-result-pill', _vmResultFilter);
+    loadVMList(1);
+  });
+});
+
+// ── Pagination listeners ──────────────────────────────────────────────────────
+document.getElementById('btnVMFirst').addEventListener('click', () => loadVMList(1));
+document.getElementById('btnVMPrev').addEventListener('click',  () => loadVMList(_vmPage - 1));
+document.getElementById('btnVMNext').addEventListener('click',  () => loadVMList(_vmPage + 1));
+document.getElementById('btnVMLast').addEventListener('click',  () => loadVMList(_vmTotalPages));
+document.getElementById('vmPageSize').addEventListener('change', function() {
+  _vmPageSize = parseInt(this.value);
+  loadVMList(1);
+});
+
+// ── Export Excel ──────────────────────────────────────────────────────────────
+document.getElementById('btnExportVMs').addEventListener('click', () => {
+  const p = _buildVMParams(1, 10000);
+  window.location.href = '/api/export/protection-vm-excel?' + p.toString();
+});
+
+// ── Export PowerPoint ─────────────────────────────────────────────────────────
+document.getElementById('btnExportProtPPTX').addEventListener('click', () => {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const clientId  = document.getElementById('selClient').value;
+  const period    = document.getElementById('selPeriod').value;
+  if (!dateStart || !dateEnd) {
+    alert('Selecione o período antes de exportar.');
+    return;
+  }
+  const p = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, period });
+  if (clientId) p.set('client_id', clientId);
+  window.location.href = '/api/export/protection-pptx?' + p.toString();
+});
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadData);
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value = '';
+  document.getElementById('selPeriod').value = 'fortnight';
+  setDefaultDates();
+  updateClientHeader();
+  showWaiting();
+});
+
+document.getElementById('selClient').addEventListener('change', function () {
+  updateClientHeader();
+});
+
+// ── Inicialização ──────────────────────────────────────────────────────────────
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

@@ -1,0 +1,1138 @@
+{% extends "base.html" %}
+{% block title %}Análise Técnica de Offload{% endblock %}
+
+{% block content %}
+<style>
+/* ── Timeline ───────────────────────────────────────────────── */
+.tl-wrap {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  gap: 2px;
+  padding: 8px 4px;
+  background: var(--bs-light);
+  border-radius: 6px;
+  min-height: 52px;
+  align-items: center;
+  scrollbar-width: thin;
+  width: 100%;
+  max-width: 100%;
+}
+/* As barras preenchem a largura disponível (flex:1) até um teto;
+   se houver muitas, encolhem até min-width e o PRÓPRIO bloco rola (não a página). */
+.tl-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  max-width: 14px;
+  height: 36px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity .12s, transform .12s;
+  position: relative;
+}
+.tl-bar:hover { opacity: .75; transform: scaleY(1.15); }
+.tl-Success { background: #198754; }
+.tl-Warning { background: #ffc107; }
+.tl-Failed  { background: #dc3545; }
+.tl-legend  { gap: 1rem; }
+
+/* ── Custom tooltip ─────────────────────────────────────────── */
+#tl-tooltip {
+  position: fixed;
+  background: #1e2230;
+  color: #f0f4ff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: .78rem;
+  line-height: 1.5;
+  pointer-events: none;
+  z-index: 9999;
+  max-width: 320px;
+  display: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+
+/* ── Table ──────────────────────────────────────────────────── */
+.exec-table th { font-size: .78rem; white-space: nowrap; }
+.exec-table td { font-size: .79rem; vertical-align: middle; }
+.reason-cell   { max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; cursor: default; }
+.detail-row td { background: #f8f9fa; font-size: .78rem; }
+.detail-grid   { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                 gap: .5rem 1.5rem; }
+.detail-field  { display: flex; flex-direction: column; }
+.detail-label  { font-size: .68rem; color: #6c757d; font-weight: 600;
+                 text-transform: uppercase; letter-spacing: .04em; }
+.detail-value  { font-size: .8rem; color: #212529; word-break: break-all; }
+.reason-raw-box { font-family: monospace; font-size: .75rem; background:#fff;
+                  border: 1px solid #dee2e6; border-radius: 4px; padding: 8px;
+                  white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+
+/* ── Autocomplete dropdown ───────────────────────────────────── */
+#job-dropdown {
+  position: absolute;
+  z-index: 1000;
+  width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+}
+.job-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: .82rem;
+}
+.job-item:hover { background: #f0f5ff; }
+.job-item .jname { font-weight: 600; color: #212529; }
+.job-item .jstats { color: #6c757d; font-size: .72rem; }
+
+/* ── KPI cards ──────────────────────────────────────────────── */
+.kpi-sm { font-size: .7rem; color: #6c757d; font-weight: 600;
+          text-transform: uppercase; letter-spacing: .05em; }
+.kpi-val { font-size: 1.4rem; font-weight: 700; line-height: 1.1; }
+
+/* ── Transition badges ───────────────────────────────────────── */
+.trans-arrow { font-size: 1rem; }
+.result-icon-Success { color: #198754; }
+.result-icon-Warning { color: #ffc107; }
+.result-icon-Failed  { color: #dc3545; }
+
+/* ── First-error panel ───────────────────────────────────────── */
+#fe-panel .fe-time { font-size: 1.05rem; font-weight: 700; color: #dc3545; }
+#fe-panel .fe-gap  { font-size: .9rem; color: #6c757d; }
+.ctx-row { border-left: 4px solid #dee2e6; padding: 4px 8px; margin-bottom: 3px;
+           border-radius: 0 4px 4px 0; font-size: .79rem; }
+.ctx-row.ctx-first-error { border-color: #dc3545; background: #fff5f5; }
+.ctx-row.ctx-Success { border-color: #198754; }
+.ctx-row.ctx-Warning { border-color: #ffc107; }
+.ctx-row.ctx-Failed  { border-color: #dc3545; }
+</style>
+
+<!-- Tooltip flutuante da timeline -->
+<div id="tl-tooltip"></div>
+
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-search-heart" style="color:var(--brand-primary)"></i>
+      Análise Técnica de Offload
+    </h4>
+    <p class="text-muted small mb-0">
+      Investigue execuções, falhas e histórico de rotinas de Capacity Tier.
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/dashboard/offload" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-graph-up me-1"></i>Visão Gerencial
+    </a>
+  </div>
+</div>
+
+<!-- ═══ FILTROS ════════════════════════════════════════════════════════════ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header d-flex align-items-center justify-content-between py-2">
+    <span class="fw-semibold small"><i class="bi bi-funnel me-1"></i>Filtros de Investigação</span>
+    <button class="btn btn-sm btn-link text-muted p-0" id="btn-clear-filters">
+      <i class="bi bi-x-circle me-1"></i>Limpar
+    </button>
+  </div>
+  <div class="card-body pb-2">
+
+    <!-- Linha 1: Cliente + Período + Últimas N -->
+    <div class="row g-2 mb-2">
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Cliente</label>
+        <select id="f-client" class="form-select form-select-sm">
+          <option value="">Selecione...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Data início</label>
+        <input type="date" id="f-date-start" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Data fim</label>
+        <input type="date" id="f-date-end" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Últimas N execuções</label>
+        <input type="number" id="f-last-n" class="form-control form-control-sm"
+               list="last-n-suggestions" min="1" max="20000" step="1"
+               value="100" placeholder="vazio = usar período"
+               title="Digite quantas execuções recentes carregar. Deixe vazio para usar o período.">
+        <datalist id="last-n-suggestions">
+          <option value="50"></option>
+          <option value="100"></option>
+          <option value="200"></option>
+          <option value="500"></option>
+          <option value="1000"></option>
+          <option value="2000"></option>
+          <option value="5000"></option>
+        </datalist>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Resultado</label>
+        <select id="f-result" class="form-select form-select-sm">
+          <option value="">Todos</option>
+          <option value="Success">Success</option>
+          <option value="Warning">Warning</option>
+          <option value="Failed">Failed</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Linha 2: Autocomplete de rotina -->
+    <div class="row g-2 mb-2">
+      <div class="col-md-6">
+        <label class="form-label form-label-sm mb-1">Rotina de Offload
+          <span class="text-muted">(digite para buscar)</span>
+        </label>
+        <div class="position-relative">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-hdd-rack"></i></span>
+            <input type="text" id="f-job-search" class="form-control"
+                   placeholder="Ex: SRV-EXEMPLO..." autocomplete="off" disabled>
+            <button class="btn btn-outline-secondary" id="btn-clear-job" type="button"
+                    style="display:none" title="Limpar rotina">
+              <i class="bi bi-x"></i>
+            </button>
+          </div>
+          <div id="job-dropdown" style="display:none"></div>
+        </div>
+        <div id="job-selected-info" class="mt-1" style="display:none">
+          <span class="badge bg-primary" id="job-selected-badge"></span>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Categoria do motivo</label>
+        <select id="f-category" class="form-select form-select-sm">
+          <option value="">Todas as categorias</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Motivo contém texto</label>
+        <input type="text" id="f-reason-search" class="form-control form-control-sm"
+               placeholder="Ex: rescan, timeout, certificate...">
+      </div>
+    </div>
+
+    <!-- Linha 3: Opções extras -->
+    <div class="row g-2 mb-3 align-items-end">
+      <div class="col-auto">
+        <div class="form-check form-check-sm">
+          <input class="form-check-input" type="checkbox" id="f-only-reason">
+          <label class="form-check-label small" for="f-only-reason">
+            Só com motivo registrado
+          </label>
+        </div>
+      </div>
+      <div class="col-auto">
+        <div class="form-check form-check-sm">
+          <input class="form-check-input" type="checkbox" id="f-only-transitions">
+          <label class="form-check-label small" for="f-only-transitions">
+            Só mudanças de status
+          </label>
+        </div>
+      </div>
+      <div class="col ms-auto text-end">
+        <button class="btn btn-primary btn-sm px-4" id="btn-query" disabled>
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ ÁREA DE RESULTADOS ════════════════════════════════════════════════ -->
+<div id="results-area" style="display:none">
+
+  <!-- KPI cards de resumo -->
+  <div class="row g-3 mb-4" id="kpi-row"></div>
+
+  <!-- Timeline -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between py-2">
+      <span class="fw-semibold small">
+        <i class="bi bi-bar-chart-steps me-1"></i>Linha do Tempo
+        <span class="text-muted fw-normal" id="tl-count-label"></span>
+      </span>
+      <div class="d-flex align-items-center gap-3 tl-legend small">
+        <span><i class="bi bi-square-fill text-success me-1"></i>Success</span>
+        <span><i class="bi bi-square-fill text-warning me-1"></i>Warning</span>
+        <span><i class="bi bi-square-fill text-danger me-1"></i>Failed</span>
+      </div>
+    </div>
+    <div class="card-body py-2 px-3">
+      <div class="tl-wrap" id="timeline-strip"></div>
+    </div>
+  </div>
+
+  <!-- Breakdown por categoria + Transições (lado a lado) -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header py-2">
+          <span class="fw-semibold small">
+            <i class="bi bi-pie-chart me-1"></i>Distribuição por Categoria
+          </span>
+        </div>
+        <div class="card-body" id="cat-breakdown">
+          <p class="text-muted small mb-0">Sem dados de falha.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-header d-flex align-items-center justify-content-between py-2">
+          <span class="fw-semibold small">
+            <i class="bi bi-arrow-left-right me-1"></i>Mudanças de Status
+          </span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="btn-load-transitions"
+                  style="font-size:.72rem">
+            <i class="bi bi-arrow-clockwise me-1"></i>Carregar
+          </button>
+        </div>
+        <div class="card-body p-2" id="transitions-panel">
+          <p class="text-muted small mb-0 p-1">
+            Clique em "Carregar" para analisar transições de estado da rotina.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PRIMEIRO ERRO ══════════════════════════════════════════════════ -->
+  <div class="card shadow-sm mb-4 border-warning">
+    <div class="card-header d-flex align-items-center justify-content-between py-2 bg-warning bg-opacity-10">
+      <span class="fw-semibold small">
+        <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+        Encontrar Início do Problema
+      </span>
+      <button class="btn btn-sm btn-warning" id="btn-first-error">
+        <i class="bi bi-search me-1"></i>Buscar primeira falha
+      </button>
+    </div>
+    <div class="card-body" id="fe-panel" style="display:none"></div>
+  </div>
+
+  <!-- ═══ TABELA DE EXECUÇÕES ════════════════════════════════════════════ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header py-2">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <span class="fw-semibold small">
+          <i class="bi bi-table me-1"></i>Execuções
+          <span class="text-muted fw-normal ms-1" id="table-count-label"></span>
+        </span>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <!-- Filtro rápido de resultado (inclui sucessos) -->
+          <div class="btn-group btn-group-sm" role="group" id="quick-result-filter">
+            <button type="button" class="btn btn-outline-secondary active" data-result=""
+                    onclick="quickFilterResult('')">Todos</button>
+            <button type="button" class="btn btn-outline-success" data-result="Success"
+                    onclick="quickFilterResult('Success')">Success</button>
+            <button type="button" class="btn btn-outline-warning" data-result="Warning"
+                    onclick="quickFilterResult('Warning')">Warning</button>
+            <button type="button" class="btn btn-outline-danger" data-result="Failed"
+                    onclick="quickFilterResult('Failed')">Failed</button>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-success" id="btn-export-excel"
+                  onclick="exportExcel()" title="Exportar execuções para Excel">
+            <i class="bi bi-file-earmark-excel me-1"></i>Excel
+          </button>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end mt-1" id="pagination-top"></div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover exec-table mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Início</th>
+              <th>Fim</th>
+              <th>Result.</th>
+              <th>Duração</th>
+              <th>Categoria</th>
+              <th>Motivo</th>
+              <th>IP:Porta</th>
+              <th>Session ID</th>
+              <th class="text-center">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="exec-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-footer d-flex align-items-center justify-content-between py-2"
+         id="pagination-footer" style="display:none!important"></div>
+  </div>
+
+</div><!-- /results-area -->
+
+<!-- Loading overlay -->
+<div id="loading-overlay" class="text-center py-5" style="display:none">
+  <div class="spinner-border text-primary mb-3" role="status"></div>
+  <p class="text-muted small" id="loading-msg">Consultando...</p>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Análise Técnica de Offload — JS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let selectedJob = null;   // {offload_job_id, job_name, ...}
+let lastExecData = null;  // última resposta de executions
+let jobSearchTimer = null;
+
+// ── Inicialização ──────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const today = new Date();
+  const m1    = new Date(today); m1.setDate(today.getDate() - 30);
+  document.getElementById('f-date-end').value   = fmtInputDate(today);
+  document.getElementById('f-date-start').value = fmtInputDate(m1);
+
+  document.getElementById('f-client').addEventListener('change', onClientChange);
+  document.getElementById('f-job-search').addEventListener('input', onJobSearchInput);
+  document.getElementById('f-job-search').addEventListener('blur', () => {
+    setTimeout(() => { document.getElementById('job-dropdown').style.display = 'none'; }, 200);
+  });
+  document.getElementById('btn-clear-job').addEventListener('click', clearJob);
+  document.getElementById('btn-clear-filters').addEventListener('click', clearFilters);
+  document.getElementById('btn-query').addEventListener('click', doQuery);
+  document.getElementById('btn-first-error').addEventListener('click', doFirstError);
+  document.getElementById('btn-load-transitions').addEventListener('click', doTransitions);
+
+  // Tooltip da timeline
+  document.addEventListener('mousemove', e => {
+    const tt = document.getElementById('tl-tooltip');
+    if (tt.style.display === 'block') {
+      tt.style.left = (e.clientX + 12) + 'px';
+      tt.style.top  = (e.clientY - 10) + 'px';
+    }
+  });
+});
+
+// ── Cliente selecionado ────────────────────────────────────────────────────
+function onClientChange() {
+  clearJob();
+  const clientId = document.getElementById('f-client').value;
+  const jobInput = document.getElementById('f-job-search');
+  jobInput.disabled = !clientId;
+  jobInput.value = '';
+  updateQueryBtn();
+}
+
+// ── Autocomplete de rotina ─────────────────────────────────────────────────
+function onJobSearchInput() {
+  clearTimeout(jobSearchTimer);
+  const q = document.getElementById('f-job-search').value.trim();
+  if (q.length < 1) { closeDropdown(); return; }
+  jobSearchTimer = setTimeout(() => fetchJobs(q), 280);
+}
+
+async function fetchJobs(search) {
+  const clientId = document.getElementById('f-client').value;
+  if (!clientId) return;
+  try {
+    const r = await fetch(`/api/offload/analytics/jobs?client_id=${clientId}&search=${encodeURIComponent(search)}&limit=20`);
+    const jobs = await r.json();
+    renderDropdown(jobs);
+  } catch { closeDropdown(); }
+}
+
+function renderDropdown(jobs) {
+  const dd = document.getElementById('job-dropdown');
+  if (!jobs.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = jobs.map(j => `
+    <div class="job-item" data-id="${j.offload_job_id}" onclick="selectJob(${JSON.stringify(j).replace(/"/g, '&quot;')})">
+      <div class="jname">${escHtml(j.job_name)}</div>
+      <div class="jstats">
+        Total: ${j.total_executions} &nbsp;|&nbsp;
+        <span class="text-danger">Failed: ${j.failed_count}</span>
+        ${j.warning_count ? `&nbsp;| <span class="text-warning">Warn: ${j.warning_count}</span>` : ''}
+        ${j.last_execution_fmt ? `&nbsp;| Última: ${j.last_execution_fmt}` : ''}
+      </div>
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+
+function selectJob(job) {
+  selectedJob = job;
+  document.getElementById('f-job-search').value = job.job_name;
+  document.getElementById('btn-clear-job').style.display = '';
+  document.getElementById('job-selected-info').style.display = '';
+  document.getElementById('job-selected-badge').textContent = job.job_name;
+  closeDropdown();
+  updateQueryBtn();
+}
+
+function clearJob() {
+  selectedJob = null;
+  document.getElementById('f-job-search').value = '';
+  document.getElementById('btn-clear-job').style.display = 'none';
+  document.getElementById('job-selected-info').style.display = 'none';
+  closeDropdown();
+  updateQueryBtn();
+}
+
+function closeDropdown() {
+  document.getElementById('job-dropdown').style.display = 'none';
+}
+
+function updateQueryBtn() {
+  const clientId = document.getElementById('f-client').value;
+  document.getElementById('btn-query').disabled = !(clientId && selectedJob);
+}
+
+// ── Consulta principal ─────────────────────────────────────────────────────
+async function doQuery() {
+  if (!selectedJob) return;
+  const params = gatherParams();
+  setLoading(true, 'Carregando resumo e execuções...');
+
+  try {
+    // Summary e execuções em paralelo
+    const [summary, execs] = await Promise.all([
+      fetchSummary(params),
+      fetchExecutions(params, 1),
+    ]);
+
+    lastExecData = execs;
+    document.getElementById('results-area').style.display = '';
+    renderSummary(summary);
+    renderTimeline(execs.items);
+    renderCategoryBreakdown(summary.by_category);
+    renderTable(execs);
+    syncQuickFilterButtons();
+    // Reset painel transições
+    document.getElementById('transitions-panel').innerHTML =
+      '<p class="text-muted small mb-0 p-1">Clique em "Carregar" para analisar transições de estado da rotina.</p>';
+    document.getElementById('fe-panel').style.display = 'none';
+    document.getElementById('fe-panel').innerHTML = '';
+  } catch (e) {
+    showError('Erro ao consultar: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Summary ────────────────────────────────────────────────────────────────
+async function fetchSummary(params) {
+  const q = new URLSearchParams({
+    client_id:      params.clientId,
+    offload_job_id: selectedJob.offload_job_id,
+  });
+  // Em modo "Últimas N", o resumo usa a mesma janela da timeline (ignora datas)
+  if (params.lastN) {
+    q.set('last_n', params.lastN);
+  } else {
+    if (params.dateStart) q.set('date_start', params.dateStart);
+    if (params.dateEnd)   q.set('date_end',   params.dateEnd);
+  }
+  const r = await fetch('/api/offload/analytics/job-summary?' + q);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function renderSummary(d) {
+  const fr = d.failure_rate ?? 0;
+  const frColor = fr >= 50 ? 'danger' : fr >= 20 ? 'warning' : 'success';
+  const kpis = [
+    { label: 'Total Execuções', value: d.total_executions, icon: 'bi-play-circle', color: 'primary' },
+    { label: 'Sucesso',         value: d.success_count,    icon: 'bi-check-circle', color: 'success' },
+    { label: 'Warning',         value: d.warning_count,    icon: 'bi-exclamation-circle', color: 'warning' },
+    { label: 'Falhas',          value: d.failed_count,     icon: 'bi-x-circle', color: 'danger' },
+    { label: 'Taxa de Falha',   value: fr + '%',            icon: 'bi-percent', color: frColor },
+    { label: 'Duração Média',   value: d.avg_duration_fmt || '—', icon: 'bi-stopwatch', color: 'secondary' },
+    { label: 'Primeira Execução', value: d.first_execution_fmt || '—', icon: 'bi-calendar-event', color: 'secondary', small: true },
+    { label: 'Última Execução',   value: d.last_execution_fmt  || '—', icon: 'bi-calendar-check', color: 'secondary', small: true },
+    { label: 'Primeira Falha',    value: d.first_failure_fmt   || '—', icon: 'bi-calendar-x', color: d.first_failure_fmt ? 'danger' : 'secondary', small: true },
+    { label: 'Último Sucesso',    value: d.last_success_fmt    || '—', icon: 'bi-calendar2-check', color: d.last_success_fmt ? 'success' : 'secondary', small: true },
+    { label: 'Categoria Principal', value: d.most_common_reason_category || '—', icon: 'bi-tag', color: 'secondary', small: true },
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(k => `
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3 px-3">
+          <div class="kpi-sm"><i class="bi ${k.icon} me-1"></i>${k.label}</div>
+          <div class="kpi-val text-${k.color} ${k.small ? 'fs-6' : ''}">${k.value ?? '—'}</div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Execuções ──────────────────────────────────────────────────────────────
+async function fetchExecutions(params, page) {
+  const q = new URLSearchParams({
+    client_id:          params.clientId,
+    offload_job_id:     selectedJob.offload_job_id,
+    page,
+    page_size:          params.pageSize,
+    only_with_reason:   params.onlyReason ? '1' : '0',
+    only_transitions:   params.onlyTrans  ? '1' : '0',
+  });
+  if (params.lastN)          q.set('last_n', params.lastN);
+  else {
+    if (params.dateStart)    q.set('date_start', params.dateStart);
+    if (params.dateEnd)      q.set('date_end',   params.dateEnd);
+  }
+  if (params.result)         q.set('result', params.result);
+  if (params.categoryId)     q.set('reason_category_id', params.categoryId);
+  if (params.reasonSearch)   q.set('reason_search', params.reasonSearch);
+  const r = await fetch('/api/offload/analytics/executions?' + q);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ── Timeline ───────────────────────────────────────────────────────────────
+function renderTimeline(items) {
+  const strip = document.getElementById('timeline-strip');
+  document.getElementById('tl-count-label').textContent =
+    `— ${items.length} execução(ões)`;
+
+  if (!items.length) {
+    strip.innerHTML = '<span class="text-muted small px-2">Sem execuções.</span>';
+    return;
+  }
+
+  // A largura das barras é controlada por CSS (flex): preenchem o espaço e,
+  // se forem muitas, encolhem até min-width e o bloco rola internamente.
+  strip.innerHTML = items.map((s, i) => {
+    const tip = [
+      `<b>${s.started_at_fmt || '—'}</b>`,
+      `Resultado: <b style="color:${resultColor(s.result)}">${s.result}</b>`,
+      s.duration_fmt ? `Duração: ${s.duration_fmt}` : null,
+      s.reason_category ? `Categoria: ${s.reason_category}` : null,
+      s.reason_raw ? `Motivo: ${escHtml((s.reason_raw || '').substring(0, 120))}...` : null,
+    ].filter(Boolean).join('<br>');
+    return `<span class="tl-bar tl-${s.result}"
+      data-idx="${i}"
+      onmouseenter="showTlTip(this, '${encodeURIComponent(tip)}')"
+      onmouseleave="hideTlTip()"
+      onclick="scrollToRow(${i})"></span>`;
+  }).join('');
+}
+
+function resultColor(r) {
+  return r === 'Success' ? '#198754' : r === 'Warning' ? '#e6a700' : '#dc3545';
+}
+
+function showTlTip(el, enc) {
+  const tt = document.getElementById('tl-tooltip');
+  tt.innerHTML = decodeURIComponent(enc);
+  tt.style.display = 'block';
+}
+function hideTlTip() {
+  document.getElementById('tl-tooltip').style.display = 'none';
+}
+
+function scrollToRow(idx) {
+  const row = document.querySelector(`tr[data-idx="${idx}"]`);
+  if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ── Category breakdown ─────────────────────────────────────────────────────
+function renderCategoryBreakdown(cats) {
+  const el = document.getElementById('cat-breakdown');
+  if (!cats || !cats.length) {
+    el.innerHTML = '<p class="text-muted small mb-0">Sem falhas no período.</p>';
+    return;
+  }
+  el.innerHTML = cats.map(c => `
+    <div class="mb-2">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span class="small fw-semibold" style="max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${escHtml(c.category_name)}
+        </span>
+        <span class="small text-muted">${c.count} (${c.pct}%)</span>
+      </div>
+      <div class="progress" style="height:8px">
+        <div class="progress-bar" role="progressbar"
+             style="width:${c.pct}%;background:${c.color || '#6c757d'}">
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Tabela de execuções ────────────────────────────────────────────────────
+function renderTable(data) {
+  const tbody = document.getElementById('exec-tbody');
+  document.getElementById('table-count-label').textContent =
+    `— ${data.total} total${data.mode === 'last_n' ? ' (últimas ' + data.total + ')' : ''}`;
+
+  if (!data.items.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">
+      Nenhuma execução encontrada.</td></tr>`;
+    renderPagination(data);
+    return;
+  }
+
+  tbody.innerHTML = data.items.map((s, i) => {
+    const rBadge = resultBadge(s.result);
+    const motivo = s.reason_raw ? escHtml(s.reason_raw.substring(0, 60)) + (s.reason_raw.length > 60 ? '…' : '') : '—';
+    const ipPort = s.target_ip ? `${s.target_ip}${s.target_port ? ':' + s.target_port : ''}` : '—';
+    const sid    = s.session_id ? s.session_id.substring(0, 12) + '…' : '—';
+    return `
+    <tr data-idx="${i}" data-rowid="${s.id}">
+      <td>${s.started_at_fmt || '—'}</td>
+      <td>${s.ended_at_fmt   || '—'}</td>
+      <td>${rBadge}</td>
+      <td>${s.duration_fmt   || '—'}</td>
+      <td>
+        ${s.reason_category
+          ? `<span class="badge rounded-pill" style="background:${s.reason_category_color || '#6c757d'};font-size:.68rem">${escHtml(s.reason_category)}</span>`
+          : '<span class="text-muted">—</span>'}
+      </td>
+      <td class="reason-cell" title="${escHtml(s.reason_raw || '')}">${motivo}</td>
+      <td class="font-monospace" style="font-size:.74rem">${ipPort}</td>
+      <td class="font-monospace" style="font-size:.74rem" title="${s.session_id || ''}">${sid}</td>
+      <td class="text-center">
+        <div class="d-flex gap-1 justify-content-center">
+          <button class="btn btn-xs btn-outline-secondary py-0 px-1"
+                  onclick="toggleDetail(${s.id})"
+                  title="Expandir detalhes" style="font-size:.75rem">
+            <i class="bi bi-plus-lg" id="icon-${s.id}"></i>
+          </button>
+          ${s.reason_raw ? `
+          <button class="btn btn-xs btn-outline-secondary py-0 px-1"
+                  onclick="copyText('${escAttr(s.reason_raw)}')"
+                  title="Copiar motivo" style="font-size:.75rem">
+            <i class="bi bi-clipboard"></i>
+          </button>` : ''}
+          ${s.session_id ? `
+          <button class="btn btn-xs btn-outline-secondary py-0 px-1"
+                  onclick="copyText('${escAttr(s.session_id)}')"
+                  title="Copiar Session ID" style="font-size:.75rem">
+            <i class="bi bi-fingerprint"></i>
+          </button>` : ''}
+        </div>
+      </td>
+    </tr>
+    <tr id="detail-${s.id}" class="detail-row" style="display:none">
+      <td colspan="9" class="p-3">
+        ${renderDetailPanel(s)}
+      </td>
+    </tr>`;
+  }).join('');
+
+  renderPagination(data);
+}
+
+function renderDetailPanel(s) {
+  const fields = [
+    ['Job Name',            s.job_name],
+    ['Job Normalizado',     s.job_name_normalized],
+    ['Session ID',          s.session_id],
+    ['Source Job ID',       s.source_job_id],
+    ['Resultado',           s.result],
+    ['Estado',              s.state],
+    ['Início',              s.started_at_fmt],
+    ['Fim',                 s.ended_at_fmt],
+    ['Duração',             s.duration_fmt],
+    ['Categoria',           s.reason_category],
+    ['Regra / Pattern',     s.matched_pattern],
+    ['IP Destino',          s.target_ip],
+    ['Porta Destino',       s.target_port],
+    ['Carga de Origem',     s.offload_import_id ? '#' + s.offload_import_id : null],
+    ['Data Importação',     s.imported_at_fmt],
+    ['Coletado em',         s.collected_at_fmt],
+    ['Source',              s.source],
+  ].filter(([, v]) => v != null && v !== '');
+
+  const grid = fields.map(([l, v]) => `
+    <div class="detail-field">
+      <span class="detail-label">${l}</span>
+      <span class="detail-value">${escHtml(String(v))}</span>
+    </div>`).join('');
+
+  const rawBox = s.reason_raw ? `
+    <div class="mt-3">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <span class="detail-label">Motivo Bruto (reason_raw)</span>
+        <button class="btn btn-xs btn-outline-secondary py-0 px-2" style="font-size:.72rem"
+                onclick="copyText('${escAttr(s.reason_raw)}')">
+          <i class="bi bi-clipboard me-1"></i>Copiar
+        </button>
+      </div>
+      <div class="reason-raw-box">${escHtml(s.reason_raw)}</div>
+    </div>` : '';
+
+  const normBox = s.reason_normalized ? `
+    <div class="mt-2">
+      <span class="detail-label">Motivo Normalizado</span>
+      <div class="reason-raw-box mt-1">${escHtml(s.reason_normalized)}</div>
+    </div>` : '';
+
+  return `<div class="detail-grid">${grid}</div>${rawBox}${normBox}`;
+}
+
+function toggleDetail(id) {
+  const row  = document.getElementById('detail-' + id);
+  const icon = document.getElementById('icon-' + id);
+  const open = row.style.display === '';
+  row.style.display  = open ? 'none' : '';
+  icon.className = open ? 'bi bi-plus-lg' : 'bi bi-dash-lg';
+}
+
+// ── Paginação ──────────────────────────────────────────────────────────────
+let _currentPage = 1;
+
+function renderPagination(data) {
+  _currentPage = data.page;
+  if (data.mode === 'last_n' || data.pages <= 1) {
+    ['pagination-top', 'pagination-footer'].forEach(id => {
+      document.getElementById(id).innerHTML = '';
+    });
+    document.getElementById('pagination-footer').style.setProperty('display', 'none', 'important');
+    return;
+  }
+
+  const html = `
+    <small class="text-muted">Pág. ${data.page}/${data.pages} — ${data.total} execuções</small>
+    <div class="btn-group btn-group-sm ms-2">
+      <button class="btn btn-outline-secondary" onclick="goPage(1)" ${data.page === 1 ? 'disabled' : ''}>
+        <i class="bi bi-chevron-double-left"></i>
+      </button>
+      <button class="btn btn-outline-secondary" onclick="goPage(${data.page - 1})" ${data.page === 1 ? 'disabled' : ''}>
+        <i class="bi bi-chevron-left"></i>
+      </button>
+      <button class="btn btn-outline-secondary" onclick="goPage(${data.page + 1})" ${data.page >= data.pages ? 'disabled' : ''}>
+        <i class="bi bi-chevron-right"></i>
+      </button>
+      <button class="btn btn-outline-secondary" onclick="goPage(${data.pages})" ${data.page >= data.pages ? 'disabled' : ''}>
+        <i class="bi bi-chevron-double-right"></i>
+      </button>
+    </div>`;
+
+  document.getElementById('pagination-top').innerHTML = html;
+  document.getElementById('pagination-footer').innerHTML = html;
+  document.getElementById('pagination-footer').style.removeProperty('display');
+}
+
+async function goPage(page) {
+  const params = gatherParams();
+  setLoading(true, 'Carregando página ' + page + '...');
+  try {
+    const data = await fetchExecutions(params, page);
+    lastExecData = data;
+    renderTable(data);
+    window.scrollTo({ top: document.getElementById('exec-tbody').getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Primeiro erro ──────────────────────────────────────────────────────────
+async function doFirstError() {
+  if (!selectedJob) return;
+  const params = gatherParams();
+  setLoading(true, 'Buscando primeira falha...');
+  try {
+    const q = new URLSearchParams({
+      client_id:      params.clientId,
+      offload_job_id: selectedJob.offload_job_id,
+      result_filter:  params.result || 'Failed',
+      context_size:   5,
+    });
+    if (params.dateStart)   q.set('date_start', params.dateStart);
+    if (params.dateEnd)     q.set('date_end',   params.dateEnd);
+    if (params.categoryId)  q.set('reason_category_id', params.categoryId);
+    if (params.reasonSearch) q.set('reason_search', params.reasonSearch);
+
+    const r = await fetch('/api/offload/analytics/first-error?' + q);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderFirstError(data);
+  } catch (e) {
+    showError('Erro ao buscar primeiro erro: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderFirstError(d) {
+  const panel = document.getElementById('fe-panel');
+  panel.style.display = '';
+
+  if (!d.first_error) {
+    panel.innerHTML = `<p class="text-muted small mb-0">
+      <i class="bi bi-check-circle-fill text-success me-1"></i>
+      Nenhuma falha encontrada com os filtros aplicados.</p>`;
+    return;
+  }
+
+  const fe = d.first_error;
+  const ps = d.previous_success;
+
+  const gapHtml = ps ? `
+    <div class="alert alert-secondary py-2 px-3 mb-0 small">
+      <b>Último sucesso antes da falha:</b> ${ps.started_at_fmt || '—'}<br>
+      <b>Intervalo:</b> ${d.time_gap_fmt || '—'}
+      ${d.time_gap_seconds ? ` (${d.time_gap_seconds}s)` : ''}
+    </div>` : `
+    <div class="alert alert-secondary py-2 px-3 mb-0 small">
+      Nenhum sucesso encontrado antes da primeira falha.
+    </div>`;
+
+  const ctxHtml = [...d.context_before, ...d.context_after].map(s => {
+    const isFirst = s.id === fe.id;
+    return `<div class="ctx-row ctx-${s.result} ${isFirst ? 'ctx-first-error' : ''}">
+      <span class="fw-semibold">${s.started_at_fmt || '—'}</span>
+      &nbsp;${resultBadge(s.result)}
+      ${s.duration_fmt ? `<span class="text-muted ms-2">${s.duration_fmt}</span>` : ''}
+      ${isFirst ? '<span class="badge bg-danger ms-2">← PRIMEIRA FALHA</span>' : ''}
+      ${s.reason_category ? `<br><small class="text-muted">${escHtml(s.reason_category)}</small>` : ''}
+      ${s.reason_raw ? `<br><small class="text-muted font-monospace" style="font-size:.7rem">${escHtml(s.reason_raw.substring(0, 100))}${s.reason_raw.length > 100 ? '…' : ''}</small>` : ''}
+    </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="fe-time mb-1">
+          <i class="bi bi-exclamation-octagon-fill me-1"></i>
+          Primeira falha: ${fe.started_at_fmt || '—'}
+        </div>
+        <div class="mb-2">
+          ${resultBadge(fe.result)}
+          ${fe.duration_fmt ? `<span class="ms-2 small text-muted">${fe.duration_fmt}</span>` : ''}
+          ${fe.reason_category ? `<span class="ms-2 badge" style="background:${fe.reason_category_color || '#6c757d'}">${escHtml(fe.reason_category)}</span>` : ''}
+        </div>
+        ${fe.reason_raw ? `<div class="reason-raw-box mb-2">${escHtml(fe.reason_raw)}</div>` : ''}
+        ${gapHtml}
+      </div>
+      <div class="col-md-6">
+        <div class="small fw-semibold mb-2 text-muted">
+          <i class="bi bi-list-ol me-1"></i>Contexto (${d.context_before.length} antes + ${d.context_after.length} depois)
+        </div>
+        <div style="max-height:280px;overflow-y:auto">${ctxHtml || '<p class="text-muted small">Sem contexto.</p>'}</div>
+      </div>
+    </div>`;
+}
+
+// ── Transições de status ───────────────────────────────────────────────────
+async function doTransitions() {
+  if (!selectedJob) return;
+  const params = gatherParams();
+  const panel  = document.getElementById('transitions-panel');
+  panel.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+  try {
+    const q = new URLSearchParams({
+      client_id:      params.clientId,
+      offload_job_id: selectedJob.offload_job_id,
+    });
+    if (params.dateStart) q.set('date_start', params.dateStart);
+    if (params.dateEnd)   q.set('date_end',   params.dateEnd);
+    const r = await fetch('/api/offload/analytics/status-transitions?' + q);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    renderTransitions(data, panel);
+  } catch (e) {
+    panel.innerHTML = `<p class="text-danger small p-2">Erro: ${escHtml(e.message)}</p>`;
+  }
+}
+
+function renderTransitions(data, panel) {
+  if (!data.transitions.length) {
+    panel.innerHTML = '<p class="text-muted small p-2">Nenhuma transição de estado no período.</p>';
+    return;
+  }
+  panel.innerHTML = `
+    <div style="max-height:260px;overflow-y:auto">
+      <table class="table table-sm table-hover mb-0" style="font-size:.77rem">
+        <thead class="table-light sticky-top">
+          <tr><th>Data/Hora</th><th>Transição</th><th>Fase anterior</th><th>Categoria</th></tr>
+        </thead>
+        <tbody>
+          ${data.transitions.map(t => `
+          <tr>
+            <td class="text-nowrap">${t.changed_at}</td>
+            <td>
+              <span class="result-icon-${t.previous_result}">
+                <i class="bi bi-circle-fill" style="font-size:.6rem"></i>
+              </span>
+              ${t.previous_result}
+              <i class="bi bi-arrow-right trans-arrow mx-1"></i>
+              <span class="result-icon-${t.new_result}">
+                <i class="bi bi-circle-fill" style="font-size:.6rem"></i>
+              </span>
+              <b>${t.new_result}</b>
+            </td>
+            <td class="text-muted">${t.phase_duration_fmt || '—'}</td>
+            <td>
+              ${t.reason_category
+                ? `<span class="badge rounded-pill" style="background:${t.reason_category_color || '#6c757d'};font-size:.65rem">${escHtml(t.reason_category)}</span>`
+                : '<span class="text-muted">—</span>'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="px-2 pb-1 pt-1 text-muted" style="font-size:.72rem">
+      ${data.total} transição(ões) encontrada(s)
+    </div>`;
+}
+
+// ── Limpar filtros ─────────────────────────────────────────────────────────
+function clearFilters() {
+  document.getElementById('f-client').value   = '';
+  document.getElementById('f-result').value   = '';
+  document.getElementById('f-category').value = '';
+  document.getElementById('f-reason-search').value = '';
+  document.getElementById('f-last-n').value   = '100';
+  document.getElementById('f-only-reason').checked     = false;
+  document.getElementById('f-only-transitions').checked = false;
+  syncQuickFilterButtons();
+  const today = new Date();
+  const m1    = new Date(today); m1.setDate(today.getDate() - 30);
+  document.getElementById('f-date-end').value   = fmtInputDate(today);
+  document.getElementById('f-date-start').value = fmtInputDate(m1);
+  clearJob();
+  document.getElementById('f-job-search').disabled = true;
+  document.getElementById('results-area').style.display = 'none';
+  updateQueryBtn();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function gatherParams() {
+  return {
+    clientId:     document.getElementById('f-client').value,
+    dateStart:    document.getElementById('f-date-start').value,
+    dateEnd:      document.getElementById('f-date-end').value,
+    result:       document.getElementById('f-result').value,
+    categoryId:   document.getElementById('f-category').value,
+    reasonSearch: document.getElementById('f-reason-search').value.trim(),
+    onlyReason:   document.getElementById('f-only-reason').checked,
+    onlyTrans:    document.getElementById('f-only-transitions').checked,
+    lastN:        document.getElementById('f-last-n').value || null,
+    pageSize:     100,
+  };
+}
+
+// ── Filtro rápido de resultado (sincroniza com o select e reconsulta) ───────
+function quickFilterResult(r) {
+  document.getElementById('f-result').value = r;
+  syncQuickFilterButtons();
+  doQuery();
+}
+
+function syncQuickFilterButtons() {
+  const cur = document.getElementById('f-result').value;
+  document.querySelectorAll('#quick-result-filter button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.result === cur);
+  });
+}
+
+// ── Exportar execuções para Excel ──────────────────────────────────────────
+async function exportExcel() {
+  if (!selectedJob) return;
+  const params = gatherParams();
+  const btn = document.getElementById('btn-export-excel');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gerando...';
+
+  try {
+    const q = new URLSearchParams({
+      client_id:        params.clientId,
+      offload_job_id:   selectedJob.offload_job_id,
+      only_with_reason: params.onlyReason ? '1' : '0',
+    });
+    if (params.lastN)        q.set('last_n', params.lastN);
+    else {
+      if (params.dateStart)  q.set('date_start', params.dateStart);
+      if (params.dateEnd)    q.set('date_end',   params.dateEnd);
+    }
+    if (params.result)       q.set('result', params.result);
+    if (params.categoryId)   q.set('reason_category_id', params.categoryId);
+    if (params.reasonSearch) q.set('reason_search', params.reasonSearch);
+
+    const r = await fetch('/api/offload/analytics/export-excel?' + q);
+    if (!r.ok) throw new Error(await r.text());
+    const blob = await r.blob();
+
+    // Extrai filename do header, com fallback
+    let fname = 'Offload_execucoes.xlsx';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    if (m) fname = m[1];
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Erro ao exportar: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+function resultBadge(r) {
+  const cls = r === 'Success' ? 'success' : r === 'Warning' ? 'warning' : 'danger';
+  const icon = r === 'Success' ? 'check-circle-fill' : r === 'Warning' ? 'exclamation-circle-fill' : 'x-circle-fill';
+  return `<span class="badge bg-${cls}"><i class="bi bi-${icon} me-1"></i>${r}</span>`;
+}
+
+function fmtInputDate(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function setLoading(on, msg) {
+  document.getElementById('loading-overlay').style.display = on ? '' : 'none';
+  if (msg) document.getElementById('loading-msg').textContent = msg;
+  document.getElementById('btn-query').disabled = on;
+}
+
+function showError(msg) {
+  const area = document.getElementById('results-area');
+  area.style.display = '';
+  document.getElementById('kpi-row').innerHTML =
+    `<div class="col-12"><div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-1"></i>${escHtml(msg)}</div></div>`;
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(s) {
+  if (s == null) return '';
+  return String(s).replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, '');
+}
+
+function copyText(txt) {
+  navigator.clipboard.writeText(txt).then(() => {
+    // feedback visual: ícone temporário
+    const btn = event.currentTarget;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+    btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
+    setTimeout(() => {
+      btn.innerHTML = orig;
+      btn.classList.replace('btn-outline-success', 'btn-outline-secondary');
+    }, 1500);
+  });
+}
+</script>
+{% endblock %}

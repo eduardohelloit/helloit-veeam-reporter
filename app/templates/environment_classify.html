@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Classificação de Ambiente — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-tags" style="color:var(--brand-primary)"></i>
+      Classificação de Ambiente
+    </h4>
+    <p class="text-muted small mb-0">
+      Marque quais rotinas são de <strong>homologação</strong>. Sem marcar = produção.
+      Usado no relatório de Consumo por Ambiente.
+    </p>
+  </div>
+  {% if selected_client_id %}
+  <a class="btn btn-outline-primary btn-sm" href="/analytics/environment?client_id={{ selected_client_id }}">
+    <i class="bi bi-pie-chart me-1"></i>Ver relatório
+  </a>
+  {% endif %}
+</div>
+
+<!-- seletor de cliente (GET) -->
+<div class="card shadow-sm mb-3"><div class="card-body py-3">
+  <form method="get" action="/environment/classify" class="d-flex align-items-end gap-2">
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+      <select name="client_id" class="form-select form-select-sm" style="min-width:240px"
+              onchange="this.form.submit()">
+        <option value="">Selecione o cliente...</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div></div>
+
+{% if not selected_client_id %}
+  <div class="alert alert-light border">Selecione um cliente para classificar as rotinas.</div>
+{% elif not jobs %}
+  <div class="alert alert-warning">Nenhuma carga de "Backups em Disco" concluída foi encontrada para este cliente.</div>
+{% else %}
+<form method="post" action="/environment/classify">
+  <input type="hidden" name="client_id" value="{{ selected_client_id }}">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="small text-muted">
+          {{ jobs|length }} rotinas · marque as de homologação
+          (<span id="hmlCount">{{ jobs|selectattr('env','equalto','hml')|list|length }}</span> marcadas)
+        </div>
+        <div class="d-flex gap-2">
+          <input type="search" id="filtro" class="form-control form-control-sm" style="width:200px"
+                 placeholder="filtrar rotina...">
+          <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check2 me-1"></i>Salvar</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0" id="tbl">
+          <thead class="table-light"><tr>
+            <th style="width:120px">Homologação</th>
+            <th>Rotina</th>
+            <th class="text-end">Backup size</th>
+            <th class="text-end">Pontos</th>
+          </tr></thead>
+          <tbody>
+            {% for j in jobs %}
+            <tr>
+              <td>
+                <input type="hidden" name="all_jobs" value="{{ j.job }}">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input hmlchk" type="checkbox" name="hml" value="{{ j.job }}"
+                         {% if j.env == 'hml' %}checked{% endif %}>
+                </div>
+              </td>
+              <td class="fw-semibold small">{{ j.job }}</td>
+              <td class="text-end">{{ j.bytes | fmt_bytes }}</td>
+              <td class="text-end text-muted small">{{ j.pts }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</form>
+
+<script>
+  // contador
+  const chks = document.querySelectorAll('.hmlchk'), cnt = document.getElementById('hmlCount');
+  chks.forEach(c => c.addEventListener('change', () => {
+    cnt.textContent = document.querySelectorAll('.hmlchk:checked').length;
+  }));
+  // filtro
+  document.getElementById('filtro').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#tbl tbody tr').forEach(tr => {
+      tr.style.display = tr.children[1].textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+</script>
+{% endif %}
+{% endblock %}

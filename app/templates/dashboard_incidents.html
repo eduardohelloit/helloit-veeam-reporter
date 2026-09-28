@@ -1,0 +1,759 @@
+{% extends "base.html" %}
+{% block title %}Incidentes de Backup — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+
+<!-- ── Cabeçalho ─────────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-exclamation-triangle me-2 text-warning"></i>Incidentes de Backup
+      <span id="headerClientName" class="text-muted fw-normal fs-5 ms-2 d-none">
+        — <span id="headerClientNameText"></span>
+      </span>
+    </h2>
+    <p class="page-subtitle mb-0">
+      Classificação automática de ofensores com base nos eventos importados
+    </p>
+  </div>
+  <div class="d-flex gap-2 d-none" id="headerExportBtns">
+    <button class="btn btn-sm btn-outline-success" id="btnExportExcel">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar Incidentes
+    </button>
+  </div>
+</div>
+
+<!-- ── Barra de filtros ───────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-building me-1 text-muted"></i>Cliente / Ambiente
+        </label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>De
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>Até
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-12 col-sm-6 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-tags me-1 text-muted"></i>Ofensor
+        </label>
+        <select class="form-select form-select-sm" id="selOffender">
+          <option value="">Todos os ofensores</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-3 d-flex gap-1">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Limpar filtros">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado inicial ─────────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-exclamation-triangle fs-1 text-warning"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione o período e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<!-- ── Loading ────────────────────────────────────────────────────────────────── -->
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-warning" role="status"></div>
+  <p class="text-muted mt-2 small">Analisando incidentes de backup...</p>
+</div>
+
+<!-- ── Empty ──────────────────────────────────────────────────────────────────── -->
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-3">Nenhum evento de falha encontrado para o período selecionado.</p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════════
+     CONTEÚDO PRINCIPAL
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="mainContent" class="d-none">
+
+  <!-- ── Linha 1: KPI cards ─────────────────────────────────────────────────── -->
+  <div class="row g-2 mb-3">
+
+    <div class="col-6 col-md-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #dc3545">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-x-circle me-1 text-danger"></i>Total de Erros
+          </div>
+          <div class="kpi-number text-danger" id="kpiTotal">—</div>
+          <div class="text-muted small mt-1">eventos de falha no período</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #198754">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-check2-circle me-1 text-success"></i>Classificados
+          </div>
+          <div class="kpi-number text-success" id="kpiClassified">—</div>
+          <div class="text-muted small mt-1">
+            <span id="kpiRate">—</span>% do total
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #ffc107">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-question-circle me-1 text-warning"></i>Não Classificados
+          </div>
+          <div class="kpi-number text-warning" id="kpiUnclassified">—</div>
+          <div class="text-muted small mt-1">sem regra de ofensor</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #0d6efd">
+        <div class="card-body py-3">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-tags me-1 text-primary"></i>Principal Ofensor
+          </div>
+          <div class="kpi-number" style="font-size:1.1rem;color:#0d6efd" id="kpiTopOffender">—</div>
+          <div class="text-muted small mt-1" id="kpiActiveOffenders">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Linha 2: por ambiente + evolução mensal ────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Por ambiente -->
+    <div class="col-12 col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-building me-2 text-muted"></i>Erros por Ambiente
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0 align-middle">
+            <tbody id="envTable">
+              <tr><td class="text-center text-muted py-3 small">Carregando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Evolução mensal -->
+    <div class="col-12 col-md-8">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small d-flex justify-content-between">
+          <span><i class="bi bi-bar-chart me-2 text-muted"></i>Evolução Mensal de Erros</span>
+          <span class="text-muted fw-normal small" id="chartSubtitle"></span>
+        </div>
+        <div class="card-body" style="position:relative;height:220px">
+          <canvas id="chartMonthly"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Linha 3: Principais ofensores ─────────────────────────────────────── -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-list-stars me-2 text-muted"></i>Principais Ofensores</span>
+      <span class="text-muted fw-normal small">Clique em um ofensor para ver os eventos</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.82rem">
+        <thead class="table-light" style="font-size:.74rem">
+          <tr>
+            <th class="ps-3" style="width:26px"></th>
+            <th>Ofensor</th>
+            <th style="width:110px" class="text-center">Ocorrências</th>
+            <th style="width:90px"  class="text-center">% do total</th>
+            <th style="width:110px" class="text-center">Severidade</th>
+            <th style="min-width:180px">Principal string identificada</th>
+          </tr>
+        </thead>
+        <tbody id="offenderTable">
+          <tr><td colspan="6" class="text-center text-muted py-3 small">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Linha 4: Não classificados ───────────────────────────────────────── -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+      <span>
+        <i class="bi bi-question-circle me-2 text-warning"></i>
+        Erros não classificados
+        <span class="badge bg-warning text-dark ms-1" id="unclassifiedBadge" style="display:none">0</span>
+      </span>
+      <button class="btn btn-outline-secondary btn-sm d-none" id="btnLoadUnclassified">
+        <i class="bi bi-eye me-1"></i>Ver erros
+      </button>
+    </div>
+    <div id="unclassifiedSection" class="d-none">
+      <div class="px-3 py-2 border-bottom small text-muted fst-italic">
+        Mensagens agrupadas por conteúdo · Use o botão "Criar regra" para classificar padrões recorrentes
+      </div>
+      <div style="max-height:340px;overflow-y:auto">
+        <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.79rem">
+          <thead class="table-light sticky-top" style="font-size:.73rem">
+            <tr>
+              <th class="ps-3" style="min-width:350px">Mensagem (prévia)</th>
+              <th style="width:170px">Ambiente / Job</th>
+              <th style="width:140px" class="text-center">Último visto</th>
+              <th style="width:100px" class="text-center">Ocorrências</th>
+              <th style="width:110px" class="text-center">Ação</th>
+            </tr>
+          </thead>
+          <tbody id="unclassifiedTable">
+            <tr><td colspan="5" class="text-center text-muted py-3 small">
+              <div class="spinner-border spinner-border-sm"></div> Carregando...
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer d-flex justify-content-between align-items-center small text-muted py-1 px-3 flex-wrap gap-2"
+           id="unclassifiedPagination" style="display:none!important">
+        <span id="unclPaginationInfo"></span>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" id="btnUnclFirst"><i class="bi bi-chevron-double-left"></i></button>
+          <button class="btn btn-outline-secondary" id="btnUnclPrev"><i class="bi bi-chevron-left"></i></button>
+          <span class="btn btn-outline-secondary disabled px-2" id="unclPageIndicator" style="pointer-events:none;min-width:60px;text-align:center">—</span>
+          <button class="btn btn-outline-secondary" id="btnUnclNext"><i class="bi bi-chevron-right"></i></button>
+          <button class="btn btn-outline-secondary" id="btnUnclLast"><i class="bi bi-chevron-double-right"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /mainContent -->
+
+<!-- ── Modal: Drill-down por ofensor ────────────────────────────────────────── -->
+<div class="modal fade" id="modalOffenderDetail" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-bold" id="modalOffenderTitle">
+          <i class="bi bi-list-ul me-2"></i>Eventos — <span id="modalOffenderName" class="text-muted fw-normal"></span>
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0" id="modalOffenderBody">
+        <div class="text-center py-4"><div class="spinner-border text-warning" role="status"></div></div>
+      </div>
+      <div class="modal-footer py-1 justify-content-between small text-muted" id="modalOffenderFooter"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Criar regra a partir de mensagem ──────────────────────────────── -->
+<div class="modal fade" id="modalCreateRule" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Criar Regra de Ofensor</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Mensagem de referência</label>
+          <textarea class="form-control form-control-sm" id="ruleRefMsg" rows="3" readonly></textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Pattern / String para identificar *</label>
+          <input type="text" class="form-control form-control-sm font-monospace" id="ruleNewPattern">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Categoria de Ofensor *</label>
+          <select class="form-select form-select-sm" id="ruleNewCategory">
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="btnConfirmNewRule">Criar regra</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// Incidentes de Backup
+// ════════════════════════════════════════════════════════════════════════════
+
+const SEVERITY_BADGE = {
+  low:      '<span class="badge bg-light text-dark border">Baixa</span>',
+  medium:   '<span class="badge bg-warning text-dark">Média</span>',
+  high:     '<span class="badge bg-danger">Alta</span>',
+  critical: '<span class="badge" style="background:#7b1818;color:#fff">Crítica</span>',
+};
+
+Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
+Chart.defaults.font.size   = 11;
+Chart.defaults.color       = '#718096';
+
+let monthlyChart = null;
+let _lastKpis    = null;
+let _lastOff     = [];
+let _unclPage    = 1;
+let _unclPages   = 1;
+
+function fmt(n)  { return (n??0).toLocaleString('pt-BR'); }
+function esc(s)  { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function todayStr()   { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; }
+
+function setDefaultDates() {
+  document.getElementById('dateStart').value = daysAgoStr(90);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+
+// ── Estado visual ─────────────────────────────────────────────────────────────
+function showWaiting() {
+  document.getElementById('waitingState').classList.remove('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+  document.getElementById('mainContent').classList.add('d-none');
+  document.getElementById('headerExportBtns').classList.add('d-none');
+  document.getElementById('headerClientName').classList.add('d-none');
+}
+
+function updateClientHeader() {
+  const sel  = document.getElementById('selClient');
+  const name = sel.options[sel.selectedIndex]?.text || '';
+  const wrap = document.getElementById('headerClientName');
+  const txt  = document.getElementById('headerClientNameText');
+  if (sel.value && name !== 'Todos os clientes') {
+    txt.textContent = name; wrap.classList.remove('d-none');
+  } else {
+    wrap.classList.add('d-none');
+  }
+}
+
+// ── Carregar dashboard ────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const dateStart  = document.getElementById('dateStart').value;
+  const dateEnd    = document.getElementById('dateEnd').value;
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final.'); return; }
+
+  const clientId   = document.getElementById('selClient').value;
+  const offenderId = document.getElementById('selOffender').value;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+  document.getElementById('mainContent').classList.add('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+  if (clientId)   params.set('client_id',   clientId);
+  if (offenderId) params.set('offender_id', offenderId);
+
+  try {
+    const resp = await fetch('/api/incidents-dashboard?' + params);
+    if (!resp.ok) {
+      const e = await resp.json().catch(()=>({}));
+      alert(e.error || 'Erro ao consultar.'); showWaiting(); return;
+    }
+    const data = await resp.json();
+    _lastKpis  = data.kpis;
+    _lastOff   = data.offenders;
+
+    const isEmpty = (data.kpis.total_errors === 0);
+    document.getElementById('emptyState').classList.toggle('d-none', !isEmpty);
+    document.getElementById('mainContent').classList.toggle('d-none', isEmpty);
+
+    if (!isEmpty) {
+      renderKPIs(data.kpis);
+      renderEnvTable(data.by_environment);
+      renderMonthlyChart(data.monthly, data.monthly_clients);
+      renderOffenderTable(data.offenders, data.kpis.total_errors);
+      setupUnclassified(data.kpis.unclassified);
+      document.getElementById('headerExportBtns').classList.remove('d-none');
+    }
+  } catch(e) {
+    console.error(e); showWaiting();
+  } finally {
+    document.getElementById('loadingOverlay').classList.add('d-none');
+  }
+}
+
+// ── KPIs ──────────────────────────────────────────────────────────────────────
+function renderKPIs(k) {
+  document.getElementById('kpiTotal').textContent         = fmt(k.total_errors);
+  document.getElementById('kpiClassified').textContent    = fmt(k.classified);
+  document.getElementById('kpiRate').textContent          = k.classification_rate;
+  document.getElementById('kpiUnclassified').textContent  = fmt(k.unclassified);
+  document.getElementById('kpiTopOffender').textContent   = k.top_offender || '—';
+  document.getElementById('kpiActiveOffenders').textContent =
+    k.active_offenders ? `${k.active_offenders} ofensores ativos` : 'sem classificação';
+}
+
+// ── Por ambiente ──────────────────────────────────────────────────────────────
+function renderEnvTable(envs) {
+  const tbody = document.getElementById('envTable');
+  if (!envs.length) {
+    tbody.innerHTML = `<tr><td class="text-center text-muted py-2 small">Sem dados.</td></tr>`;
+    return;
+  }
+  const maxCnt = envs[0].count;
+  tbody.innerHTML = envs.map(e => {
+    const pct = maxCnt ? Math.round(e.count * 100 / maxCnt) : 0;
+    return `<tr>
+      <td class="ps-3 fw-semibold small">${esc(e.name)}</td>
+      <td class="pe-3 text-end">
+        <div class="d-flex align-items-center justify-content-end gap-2">
+          <div class="progress flex-fill" style="height:6px;max-width:80px">
+            <div class="progress-bar bg-danger" style="width:${pct}%"></div>
+          </div>
+          <span class="fw-bold text-danger small">${fmt(e.count)}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Evolução mensal ───────────────────────────────────────────────────────────
+const CHART_COLORS = [
+  '#0D6EFD','#DC3545','#FFC107','#198754','#6F42C1','#0DCAF0','#FD7E14','#20C997'
+];
+
+function renderMonthlyChart(monthly, clients) {
+  if (monthlyChart) { monthlyChart.destroy(); monthlyChart = null; }
+  if (!monthly.length) return;
+
+  const labels   = monthly.map(m => m.label);
+  const datasets = clients.map((cn, i) => ({
+    label:           cn,
+    data:            monthly.map(m => m.by_client[cn] || 0),
+    backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '88',
+    borderColor:     CHART_COLORS[i % CHART_COLORS.length],
+    borderWidth:     1.5,
+    borderRadius:    3,
+  }));
+
+  // Subtitle: range
+  if (monthly.length > 1) {
+    document.getElementById('chartSubtitle').textContent =
+      `${monthly[0].label} → ${monthly[monthly.length-1].label}`;
+  }
+
+  const ctx = document.getElementById('chartMonthly').getContext('2d');
+  monthlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { position:'top', labels:{ usePointStyle:true, padding:14 } },
+        tooltip: {
+          backgroundColor: 'rgba(45,55,72,.92)', titleColor:'#fff', bodyColor:'rgba(255,255,255,.85)',
+          padding:10, cornerRadius:6,
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.raw)}` },
+        },
+      },
+      scales: {
+        x: { stacked:true, grid:{ display:false } },
+        y: {
+          stacked:true, beginAtZero:true,
+          ticks: { callback: v => Number.isInteger(v) ? fmt(v) : null },
+        },
+      },
+    },
+  });
+}
+
+// ── Tabela de ofensores ───────────────────────────────────────────────────────
+function renderOffenderTable(offenders, total) {
+  const tbody = document.getElementById('offenderTable');
+  if (!offenders.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-3 small">
+      Nenhuma classificação encontrada. Execute o reprocessamento ou importe novos logs.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = offenders.map(o => {
+    const dot = `<span class="rounded-circle d-inline-block" style="width:10px;height:10px;background:${esc(o.color)}"></span>`;
+    const bar_pct = total ? Math.round(o.count * 100 / total) : 0;
+    const sev = SEVERITY_BADGE[o.severity] || `<span class="badge bg-light text-dark border">${esc(o.severity)}</span>`;
+    const pattern = o.top_pattern
+      ? `<code class="small text-muted">${esc(o.top_pattern)}</code>`
+      : '<span class="text-muted small">—</span>';
+    return `<tr style="cursor:pointer" onclick="openOffenderDetail(${o.id}, '${esc(o.name)}')">
+      <td class="ps-3">${dot}</td>
+      <td class="fw-semibold small">${esc(o.name)}</td>
+      <td class="text-center">
+        <div class="d-flex align-items-center justify-content-end gap-1 pe-2">
+          <div class="progress flex-fill" style="height:5px;max-width:60px">
+            <div class="progress-bar bg-danger" style="width:${Math.min(100,bar_pct*2)}%"></div>
+          </div>
+          <span class="fw-bold" style="color:${esc(o.color)};min-width:40px;text-align:right">${fmt(o.count)}</span>
+        </div>
+      </td>
+      <td class="text-center"><span class="badge" style="background:${esc(o.color)}20;color:${esc(o.color)};border:1px solid ${esc(o.color)}55;font-size:.75rem">${o.pct}%</span></td>
+      <td class="text-center">${sev}</td>
+      <td>${pattern}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Drill-down: eventos de um ofensor ─────────────────────────────────────────
+let _detailOffId   = null;
+let _detailPage    = 1;
+let _detailPages   = 1;
+
+async function openOffenderDetail(offId, offName, page=1) {
+  _detailOffId  = offId;
+  _detailPage   = page;
+  document.getElementById('modalOffenderName').textContent = offName;
+  document.getElementById('modalOffenderBody').innerHTML =
+    '<div class="text-center py-4"><div class="spinner-border text-warning"></div></div>';
+  document.getElementById('modalOffenderFooter').innerHTML = '';
+  new bootstrap.Modal(document.getElementById('modalOffenderDetail')).show();
+
+  const dateStart  = document.getElementById('dateStart').value;
+  const dateEnd    = document.getElementById('dateEnd').value;
+  const clientId   = document.getElementById('selClient').value;
+  const p = new URLSearchParams({ offender_id: offId, date_start: dateStart, date_end: dateEnd, page, page_size: 20 });
+  if (clientId) p.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/incidents-offender-detail?' + p);
+    const data = await resp.json();
+    _detailPages = data.total_pages;
+
+    if (!data.events.length) {
+      document.getElementById('modalOffenderBody').innerHTML =
+        '<p class="p-3 text-muted small">Nenhum evento encontrado.</p>';
+      return;
+    }
+
+    const rows = data.events.map(ev => `<tr>
+      <td class="ps-3 small fw-semibold">${esc(ev.time_created)}</td>
+      <td class="small text-muted">${esc(ev.client_name)}</td>
+      <td class="small text-truncate" style="max-width:220px" title="${esc(ev.job_name)}">${esc(ev.job_name)}</td>
+      <td><code style="font-size:.70rem" class="text-warning">${esc(ev.match_pattern||'')}</code></td>
+      <td class="small text-muted" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(ev.msg_preview)}">${esc(ev.msg_preview)}</td>
+    </tr>`).join('');
+
+    document.getElementById('modalOffenderBody').innerHTML = `
+      <div class="overflow-x-auto">
+        <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.78rem">
+          <thead class="table-light">
+            <tr>
+              <th class="ps-3" style="width:140px">Data/Hora</th>
+              <th style="width:140px">Ambiente</th>
+              <th style="width:220px">Job</th>
+              <th style="width:180px">String identificada</th>
+              <th>Mensagem</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    document.getElementById('modalOffenderFooter').innerHTML =
+      `<span>${(page-1)*20+1}–${Math.min(page*20, data.total)} de ${fmt(data.total)} eventos</span>
+       <div class="btn-group btn-group-sm">
+         <button class="btn btn-outline-secondary" onclick="openOffenderDetail(${offId},'${esc(offName)}',${page-1})" ${page<=1?'disabled':''}>‹</button>
+         <button class="btn btn-outline-secondary" onclick="openOffenderDetail(${offId},'${esc(offName)}',${page+1})" ${page>=data.total_pages?'disabled':''}>›</button>
+       </div>`;
+  } catch(e) {
+    document.getElementById('modalOffenderBody').innerHTML = '<p class="text-danger p-3">Erro ao carregar.</p>';
+  }
+}
+
+// ── Seção não classificados ───────────────────────────────────────────────────
+function setupUnclassified(count) {
+  const badge = document.getElementById('unclassifiedBadge');
+  const btn   = document.getElementById('btnLoadUnclassified');
+  badge.textContent = fmt(count);
+  badge.style.display = count ? '' : 'none';
+  btn.classList.toggle('d-none', count === 0);
+}
+
+document.getElementById('btnLoadUnclassified').addEventListener('click', async () => {
+  const section = document.getElementById('unclassifiedSection');
+  section.classList.remove('d-none');
+  document.getElementById('btnLoadUnclassified').classList.add('d-none');
+  await loadUnclassified(1);
+});
+
+async function loadUnclassified(page) {
+  _unclPage = page;
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const clientId  = document.getElementById('selClient').value;
+  const p = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, page, page_size: 20 });
+  if (clientId) p.set('client_id', clientId);
+
+  const tbody = document.getElementById('unclassifiedTable');
+  tbody.innerHTML = `<tr><td colspan="5" class="text-center py-3 text-muted small">
+    <div class="spinner-border spinner-border-sm me-2"></div>Carregando...</td></tr>`;
+
+  try {
+    const resp = await fetch('/api/incidents-unclassified?' + p);
+    const data = await resp.json();
+    _unclPages = data.total_pages;
+
+    if (!data.events.length) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3 small">Nenhum evento não classificado.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = data.events.map(ev => {
+      const msg = esc((ev.msg_preview||'').trim().slice(0, 180));
+      return `<tr>
+        <td class="ps-3 small" style="font-size:.74rem;max-width:350px">
+          <code class="text-muted small d-block text-truncate" title="${msg}" style="white-space:nowrap">${msg}</code>
+        </td>
+        <td class="small text-muted" style="font-size:.74rem">
+          ${esc(ev.client_name)}<br>
+          <span class="text-truncate d-block" style="max-width:160px" title="${esc(ev.job_name)}">${esc(ev.job_name||'—')}</span>
+        </td>
+        <td class="text-center small">${esc(ev.last_seen)}</td>
+        <td class="text-center"><span class="badge bg-warning text-dark">${fmt(ev.occurrence_count)}×</span></td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-outline-primary" style="font-size:.7rem;padding:.15rem .4rem"
+                  onclick="openCreateRule('${esc((ev.msg_preview||'').slice(0,300))}')">
+            <i class="bi bi-plus me-1"></i>Criar regra
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // Paginação
+    const pag = document.getElementById('unclassifiedPagination');
+    pag.style.display = data.total_pages > 1 ? '' : 'none';
+    if (data.total_pages > 1) {
+      document.getElementById('unclPaginationInfo').textContent =
+        `${(page-1)*20+1}–${Math.min(page*20, data.total)} de ${fmt(data.total)} padrões`;
+      document.getElementById('unclPageIndicator').textContent = `${page} / ${data.total_pages}`;
+      document.getElementById('btnUnclFirst').disabled = page <= 1;
+      document.getElementById('btnUnclPrev').disabled  = page <= 1;
+      document.getElementById('btnUnclNext').disabled  = page >= data.total_pages;
+      document.getElementById('btnUnclLast').disabled  = page >= data.total_pages;
+    }
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-danger p-3 small">Erro ao carregar.</td></tr>`;
+  }
+}
+
+document.getElementById('btnUnclFirst').addEventListener('click', () => loadUnclassified(1));
+document.getElementById('btnUnclPrev').addEventListener('click',  () => loadUnclassified(_unclPage - 1));
+document.getElementById('btnUnclNext').addEventListener('click',  () => loadUnclassified(_unclPage + 1));
+document.getElementById('btnUnclLast').addEventListener('click',  () => loadUnclassified(_unclPages));
+
+// ── Criar regra a partir de mensagem não classificada ─────────────────────────
+const modalCreateRule = new bootstrap.Modal(document.getElementById('modalCreateRule'));
+
+function openCreateRule(msgPreview) {
+  document.getElementById('ruleRefMsg').value   = msgPreview;
+  document.getElementById('ruleNewPattern').value = '';
+  modalCreateRule.show();
+  // Sugerir trecho da mensagem como pattern
+  const words = msgPreview.trim().split(/\s+/).slice(0, 6).join(' ');
+  document.getElementById('ruleNewPattern').value = words;
+  document.getElementById('ruleNewPattern').focus();
+  document.getElementById('ruleNewPattern').select();
+}
+
+document.getElementById('btnConfirmNewRule').addEventListener('click', async () => {
+  const pattern  = document.getElementById('ruleNewPattern').value.trim();
+  const catId    = parseInt(document.getElementById('ruleNewCategory').value);
+  if (!pattern) { alert('Informe o pattern.'); return; }
+  if (!catId)   { alert('Selecione a categoria.'); return; }
+
+  try {
+    await fetch(`/api/admin/offenders/${catId}/rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pattern, match_type: 'contains', is_active: true, priority: 100 }),
+    });
+    modalCreateRule.hide();
+    if (confirm('Regra criada. Deseja reprocessar os eventos não classificados agora?')) {
+      const r = await fetch('/api/admin/offenders/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      alert(`${d.classified} eventos classificados. Recarregue o dashboard para ver os novos dados.`);
+    }
+  } catch(e) { alert('Erro ao criar regra.'); }
+});
+
+// ── Exportar Excel ────────────────────────────────────────────────────────────
+document.getElementById('btnExportExcel').addEventListener('click', () => {
+  const dateStart  = document.getElementById('dateStart').value;
+  const dateEnd    = document.getElementById('dateEnd').value;
+  const clientId   = document.getElementById('selClient').value;
+  const offenderId = document.getElementById('selOffender').value;
+  const p = new URLSearchParams({ date_start: dateStart, date_end: dateEnd });
+  if (clientId)   p.set('client_id', clientId);
+  if (offenderId) p.set('offender_id', offenderId);
+  window.location.href = '/api/export/incidents-excel?' + p;
+});
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadDashboard);
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value   = '';
+  document.getElementById('selOffender').value = '';
+  setDefaultDates();
+  updateClientHeader();
+  showWaiting();
+});
+document.getElementById('selClient').addEventListener('change', updateClientHeader);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

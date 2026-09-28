@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+{% block title %}Ofensores de Backup — Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0"><i class="bi bi-tags me-2"></i>Regras de Classificação de Ofensores</h2>
+    <p class="page-subtitle mb-0">Categorias e padrões de string para classificação automática de erros de backup</p>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-sm btn-outline-warning" id="btnReprocess" title="Reclassificar todos os eventos com as regras atuais">
+      <i class="bi bi-arrow-repeat me-1"></i>Reprocessar
+    </button>
+    <button class="btn btn-sm btn-primary" id="btnNewCategory">
+      <i class="bi bi-plus-lg me-1"></i>Nova Categoria
+    </button>
+  </div>
+</div>
+
+<div class="alert border-0 py-2 mb-3 small d-flex gap-2" style="background:rgba(13,110,253,.07)">
+  <i class="bi bi-info-circle-fill text-primary mt-1 flex-shrink-0"></i>
+  <span>Quando um evento de falha é importado, o sistema verifica a mensagem do evento contra as strings cadastradas aqui.
+  O primeiro match encontrado (pela ordem de prioridade) define o ofensor. Clique em uma categoria para ver e gerenciar suas regras.</span>
+</div>
+
+<div class="row g-3">
+
+  <!-- ── Coluna esquerda: lista de categorias ────────────────────────────── -->
+  <div class="col-12 col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold small d-flex justify-content-between">
+        <span><i class="bi bi-list-ul me-2 text-muted"></i>Categorias</span>
+        <span class="badge bg-secondary" id="catCount">0</span>
+      </div>
+      <div class="list-group list-group-flush" id="categoryList" style="max-height:70vh;overflow-y:auto">
+        <div class="text-center py-4 text-muted small">
+          <div class="spinner-border spinner-border-sm"></div> Carregando...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Coluna direita: detalhes + regras ──────────────────────────────── -->
+  <div class="col-12 col-lg-8">
+
+    <!-- Placeholder inicial -->
+    <div id="noSelection" class="card shadow-sm">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-arrow-left fs-2 mb-3 d-block"></i>
+        Selecione uma categoria para ver e editar suas regras.
+      </div>
+    </div>
+
+    <!-- Painel de detalhes da categoria selecionada -->
+    <div id="catPanel" class="d-none">
+
+      <!-- Formulário da categoria -->
+      <div class="card shadow-sm mb-3">
+        <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+          <span id="catPanelTitle">Categoria</span>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-danger" id="btnDeleteCat">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <form id="catForm" class="row g-2">
+            <input type="hidden" id="catId">
+            <div class="col-12 col-sm-6">
+              <label class="form-label small fw-semibold mb-1">Nome *</label>
+              <input type="text" class="form-control form-control-sm" id="catName" required maxlength="200">
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small fw-semibold mb-1">Severidade</label>
+              <select class="form-select form-select-sm" id="catSeverity">
+                <option value="low">Baixa</option>
+                <option value="medium">Média</option>
+                <option value="high">Alta</option>
+                <option value="critical">Crítica</option>
+              </select>
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small fw-semibold mb-1">Cor</label>
+              <div class="d-flex gap-1 align-items-center">
+                <input type="color" class="form-control form-control-color form-control-sm" id="catColor" style="width:40px">
+                <input type="text" class="form-control form-control-sm font-monospace" id="catColorHex" maxlength="7" placeholder="#7C3AED">
+              </div>
+            </div>
+            <div class="col-12 col-sm-6">
+              <label class="form-label small fw-semibold mb-1">Descrição</label>
+              <input type="text" class="form-control form-control-sm" id="catDescription" maxlength="400">
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small fw-semibold mb-1">Prioridade</label>
+              <input type="number" class="form-control form-control-sm" id="catPriority" min="1" max="9999">
+              <div class="form-text" style="font-size:.70rem">Maior = verificado primeiro</div>
+            </div>
+            <div class="col-6 col-sm-3 d-flex align-items-end">
+              <div class="form-check mb-1">
+                <input class="form-check-input" type="checkbox" id="catActive">
+                <label class="form-check-label small" for="catActive">Ativa</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label small fw-semibold mb-1">Observações</label>
+              <textarea class="form-control form-control-sm" id="catNotes" rows="2" maxlength="1000"></textarea>
+            </div>
+            <div class="col-12 d-flex justify-content-end gap-2">
+              <button type="submit" class="btn btn-primary btn-sm px-4">
+                <i class="bi bi-floppy me-1"></i>Salvar categoria
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Regras da categoria -->
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-list-check me-2 text-muted"></i>Strings de Identificação
+            <span class="badge bg-secondary ms-1" id="ruleCount">0</span>
+          </span>
+          <button class="btn btn-sm btn-outline-primary" id="btnAddRule">
+            <i class="bi bi-plus-lg me-1"></i>Adicionar string
+          </button>
+        </div>
+
+        <!-- Formulário para nova/editar regra -->
+        <div id="ruleForm" class="card-body border-bottom bg-light d-none py-2">
+          <div class="row g-2 align-items-end">
+            <input type="hidden" id="ruleId">
+            <div class="col-12 col-sm-5">
+              <label class="form-label small fw-semibold mb-1">Pattern / String *</label>
+              <input type="text" class="form-control form-control-sm font-monospace" id="rulePattern" maxlength="500" autocomplete="off">
+            </div>
+            <div class="col-6 col-sm-2">
+              <label class="form-label small fw-semibold mb-1">Tipo</label>
+              <select class="form-select form-select-sm" id="ruleMatchType">
+                <option value="contains">Contém</option>
+                <option value="starts_with">Inicia com</option>
+                <option value="ends_with">Termina com</option>
+                <option value="regex">Regex</option>
+              </select>
+            </div>
+            <div class="col-6 col-sm-2">
+              <label class="form-label small fw-semibold mb-1">Prioridade</label>
+              <input type="number" class="form-control form-control-sm" id="rulePriority" value="100" min="1" max="9999">
+            </div>
+            <div class="col-6 col-sm-2 d-flex align-items-end pb-1">
+              <div class="d-flex flex-column gap-1">
+                <div class="form-check form-check-sm mb-0">
+                  <input class="form-check-input" type="checkbox" id="ruleCaseSensitive">
+                  <label class="form-check-label small" for="ruleCaseSensitive">Case sensitive</label>
+                </div>
+                <div class="form-check form-check-sm mb-0">
+                  <input class="form-check-input" type="checkbox" id="ruleActive" checked>
+                  <label class="form-check-label small" for="ruleActive">Ativa</label>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-sm-1 d-flex align-items-end gap-1">
+              <button class="btn btn-primary btn-sm" id="btnSaveRule"><i class="bi bi-check-lg"></i></button>
+              <button class="btn btn-outline-secondary btn-sm" id="btnCancelRule"><i class="bi bi-x-lg"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lista de regras -->
+        <div id="ruleList" style="max-height:40vh;overflow-y:auto">
+          <div class="text-center py-3 text-muted small" id="ruleListEmpty">
+            Nenhuma string cadastrada.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /catPanel -->
+  </div><!-- /col right -->
+</div><!-- /row -->
+
+<!-- ── Modal: Nova categoria ───────────────────────────────────────────── -->
+<div class="modal fade" id="modalNewCat" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Nova Categoria de Ofensor</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small fw-semibold mb-1">Nome *</label>
+          <input type="text" class="form-control form-control-sm" id="newCatName" maxlength="200">
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small fw-semibold mb-1">Severidade</label>
+            <select class="form-select form-select-sm" id="newCatSeverity">
+              <option value="low">Baixa</option>
+              <option value="medium" selected>Média</option>
+              <option value="high">Alta</option>
+              <option value="critical">Crítica</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold mb-1">Cor</label>
+            <input type="color" class="form-control form-control-color form-control-sm w-100" id="newCatColor" value="#6c757d">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="btnConfirmNewCat">Criar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ───────────────────────────────────────────────────────────── -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="offToast" class="toast align-items-center border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body fw-semibold" id="offToastMsg">OK</div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// Admin Ofensores
+// ════════════════════════════════════════════════════════════════════════════
+
+const SEVERITY_LABELS = { low:'Baixa', medium:'Média', high:'Alta', critical:'Crítica' };
+const MATCH_LABELS    = { contains:'Contém', starts_with:'Inicia com', ends_with:'Termina com', regex:'Regex' };
+
+let _categories = [];
+let _selCatId   = null;
+
+function showToast(msg, ok=true) {
+  const t = document.getElementById('offToast');
+  const m = document.getElementById('offToastMsg');
+  m.textContent = msg;
+  t.className = `toast align-items-center border-0 text-bg-${ok ? 'success' : 'danger'}`;
+  bootstrap.Toast.getOrCreateInstance(t, {delay:2800}).show();
+}
+
+function esc(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function apiFetch(url, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail||'Erro'); }
+  return r.json();
+}
+
+// ── Carregamento da lista de categorias ───────────────────────────────────────
+async function loadCategories() {
+  try {
+    _categories = await apiFetch('/api/admin/offenders');
+    renderCategoryList();
+    document.getElementById('catCount').textContent = _categories.length;
+    if (_selCatId) {
+      const cat = _categories.find(c => c.id === _selCatId);
+      if (cat) selectCategory(cat);
+    }
+  } catch(e) { showToast('Erro ao carregar categorias.', false); }
+}
+
+function renderCategoryList() {
+  const ul = document.getElementById('categoryList');
+  if (!_categories.length) {
+    ul.innerHTML = `<div class="px-3 py-3 text-muted small text-center">Nenhuma categoria cadastrada.</div>`;
+    return;
+  }
+  ul.innerHTML = _categories.map(c => {
+    const active = c.id === _selCatId ? 'active' : '';
+    const rules  = c.rules ? c.rules.length : 0;
+    const dot    = `<span class="rounded-circle d-inline-block me-2" style="width:10px;height:10px;background:${esc(c.color||'#6c757d')}"></span>`;
+    const badge  = `<span class="badge bg-light text-dark border ms-auto">${rules}</span>`;
+    const inactive = !c.is_active ? ' <span class="badge bg-secondary ms-1" style="font-size:.60rem">Inativa</span>' : '';
+    return `<button type="button" class="list-group-item list-group-item-action d-flex align-items-center py-2 px-3 ${active}"
+                data-id="${c.id}" onclick="selectCategoryById(${c.id})">
+      ${dot}<span class="flex-fill small fw-semibold text-truncate">${esc(c.name)}${inactive}</span>
+      ${badge}
+    </button>`;
+  }).join('');
+}
+
+function selectCategoryById(id) {
+  const cat = _categories.find(c => c.id === id);
+  if (cat) selectCategory(cat);
+}
+
+function selectCategory(cat) {
+  _selCatId = cat.id;
+  renderCategoryList();
+
+  // Fill form
+  document.getElementById('catId').value          = cat.id;
+  document.getElementById('catName').value         = cat.name;
+  document.getElementById('catDescription').value  = cat.description || '';
+  document.getElementById('catSeverity').value     = cat.severity || 'medium';
+  document.getElementById('catColor').value        = cat.color || '#6c757d';
+  document.getElementById('catColorHex').value     = cat.color || '#6c757d';
+  document.getElementById('catPriority').value     = cat.priority ?? 100;
+  document.getElementById('catActive').checked     = cat.is_active;
+  document.getElementById('catNotes').value        = cat.notes || '';
+  document.getElementById('catPanelTitle').textContent = cat.name;
+
+  // Show rules
+  renderRules(cat.rules || []);
+  document.getElementById('ruleCount').textContent = (cat.rules || []).length;
+
+  document.getElementById('noSelection').classList.add('d-none');
+  document.getElementById('catPanel').classList.remove('d-none');
+  hideRuleForm();
+}
+
+// ── Categorias CRUD ───────────────────────────────────────────────────────────
+document.getElementById('catForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const id = parseInt(document.getElementById('catId').value);
+  const data = {
+    name:        document.getElementById('catName').value.trim(),
+    description: document.getElementById('catDescription').value.trim(),
+    severity:    document.getElementById('catSeverity').value,
+    color:       document.getElementById('catColorHex').value.trim() || document.getElementById('catColor').value,
+    priority:    parseInt(document.getElementById('catPriority').value)||100,
+    is_active:   document.getElementById('catActive').checked,
+    notes:       document.getElementById('catNotes').value.trim(),
+  };
+  try {
+    await apiFetch(`/api/admin/offenders/${id}`, 'PUT', data);
+    showToast('Categoria salva.');
+    await loadCategories();
+  } catch(e) { showToast(e.message||'Erro ao salvar.', false); }
+});
+
+document.getElementById('btnDeleteCat').addEventListener('click', async () => {
+  if (!confirm('Excluir esta categoria e todas as suas regras?')) return;
+  const id = parseInt(document.getElementById('catId').value);
+  try {
+    await apiFetch(`/api/admin/offenders/${id}`, 'DELETE');
+    _selCatId = null;
+    document.getElementById('noSelection').classList.remove('d-none');
+    document.getElementById('catPanel').classList.add('d-none');
+    showToast('Categoria excluída.');
+    await loadCategories();
+  } catch(e) { showToast(e.message||'Erro ao excluir.', false); }
+});
+
+// Sincronizar picker de cor ↔ input hex
+document.getElementById('catColor').addEventListener('input', function() {
+  document.getElementById('catColorHex').value = this.value;
+});
+document.getElementById('catColorHex').addEventListener('input', function() {
+  if (/^#[0-9A-Fa-f]{6}$/.test(this.value)) document.getElementById('catColor').value = this.value;
+});
+
+// ── Modal nova categoria ──────────────────────────────────────────────────────
+const modalNewCat = new bootstrap.Modal(document.getElementById('modalNewCat'));
+document.getElementById('btnNewCategory').addEventListener('click', () => modalNewCat.show());
+document.getElementById('btnConfirmNewCat').addEventListener('click', async () => {
+  const name = document.getElementById('newCatName').value.trim();
+  if (!name) { alert('Informe o nome da categoria.'); return; }
+  try {
+    const cat = await apiFetch('/api/admin/offenders', 'POST', {
+      name,
+      severity: document.getElementById('newCatSeverity').value,
+      color:    document.getElementById('newCatColor').value,
+      priority: 100,
+    });
+    modalNewCat.hide();
+    document.getElementById('newCatName').value = '';
+    showToast('Categoria criada.');
+    await loadCategories();
+    selectCategoryById(cat.id);
+  } catch(e) { showToast(e.message||'Erro ao criar.', false); }
+});
+
+// ── Regras ────────────────────────────────────────────────────────────────────
+function renderRules(rules) {
+  const div = document.getElementById('ruleList');
+  const empty = document.getElementById('ruleListEmpty');
+  if (!rules.length) {
+    div.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  div.innerHTML = rules.map(r => {
+    const inactive = !r.is_active ? 'opacity-50' : '';
+    const typeLbl  = MATCH_LABELS[r.match_type] || r.match_type;
+    const csLbl    = r.case_sensitive ? ' <span class="badge bg-light text-dark border" style="font-size:.58rem">CS</span>' : '';
+    return `<div class="d-flex align-items-center px-3 py-2 border-bottom hover-row gap-2 ${inactive}" data-rid="${r.id}">
+      <code class="flex-fill small text-truncate" title="${esc(r.pattern)}">${esc(r.pattern)}</code>
+      <span class="badge bg-light text-muted border" style="font-size:.65rem;white-space:nowrap">${typeLbl}${csLbl}</span>
+      <div class="d-flex gap-1 flex-shrink-0">
+        <button class="btn btn-link btn-sm p-0 text-primary" onclick="editRule(${r.id})" title="Editar"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-link btn-sm p-0 text-danger" onclick="deleteRule(${r.id})" title="Excluir"><i class="bi bi-trash"></i></button>
+        <button class="btn btn-link btn-sm p-0 text-secondary" onclick="toggleRule(${r.id}, ${r.is_active})" title="${r.is_active?'Desativar':'Ativar'}">
+          <i class="bi bi-${r.is_active?'toggle-on text-success':'toggle-off'}"></i>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showRuleForm(prefill={}) {
+  document.getElementById('ruleId').value           = prefill.id    || '';
+  document.getElementById('rulePattern').value      = prefill.pattern || '';
+  document.getElementById('ruleMatchType').value    = prefill.match_type || 'contains';
+  document.getElementById('rulePriority').value     = prefill.priority ?? 100;
+  document.getElementById('ruleCaseSensitive').checked = prefill.case_sensitive || false;
+  document.getElementById('ruleActive').checked       = prefill.is_active !== false;
+  document.getElementById('ruleForm').classList.remove('d-none');
+  document.getElementById('rulePattern').focus();
+}
+function hideRuleForm() {
+  document.getElementById('ruleForm').classList.add('d-none');
+  document.getElementById('ruleId').value = '';
+}
+
+document.getElementById('btnAddRule').addEventListener('click', () => showRuleForm());
+document.getElementById('btnCancelRule').addEventListener('click', hideRuleForm);
+
+document.getElementById('btnSaveRule').addEventListener('click', async () => {
+  const rid     = document.getElementById('ruleId').value;
+  const pattern = document.getElementById('rulePattern').value.trim();
+  if (!pattern) { alert('Informe o pattern.'); return; }
+  const data = {
+    pattern,
+    match_type:     document.getElementById('ruleMatchType').value,
+    priority:       parseInt(document.getElementById('rulePriority').value)||100,
+    case_sensitive: document.getElementById('ruleCaseSensitive').checked,
+    is_active:      document.getElementById('ruleActive').checked,
+  };
+  try {
+    if (rid) {
+      await apiFetch(`/api/admin/offenders/rules/${rid}`, 'PUT', data);
+    } else {
+      await apiFetch(`/api/admin/offenders/${_selCatId}/rules`, 'POST', data);
+    }
+    showToast('Regra salva.');
+    hideRuleForm();
+    await loadCategories();
+  } catch(e) { showToast(e.message||'Erro ao salvar regra.', false); }
+});
+
+function editRule(rid) {
+  const cat  = _categories.find(c => c.id === _selCatId);
+  const rule = cat?.rules?.find(r => r.id === rid);
+  if (rule) showRuleForm(rule);
+}
+
+async function deleteRule(rid) {
+  if (!confirm('Excluir esta regra?')) return;
+  try {
+    await apiFetch(`/api/admin/offenders/rules/${rid}`, 'DELETE');
+    showToast('Regra excluída.');
+    await loadCategories();
+  } catch(e) { showToast(e.message||'Erro ao excluir regra.', false); }
+}
+
+async function toggleRule(rid, currentActive) {
+  try {
+    await apiFetch(`/api/admin/offenders/rules/${rid}`, 'PUT', { is_active: !currentActive });
+    await loadCategories();
+  } catch(e) { showToast(e.message||'Erro.', false); }
+}
+
+// ── Reprocessar ───────────────────────────────────────────────────────────────
+document.getElementById('btnReprocess').addEventListener('click', async () => {
+  if (!confirm('Reclassificar TODOS os eventos de falha com as regras atuais?\n\nIsso pode demorar alguns minutos dependendo do volume de dados.')) return;
+  const btn = document.getElementById('btnReprocess');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Processando...';
+  try {
+    const r = await apiFetch('/api/admin/offenders/reprocess', 'POST', {});
+    showToast(`${r.classified} eventos classificados com sucesso.`);
+  } catch(e) { showToast(e.message||'Erro no reprocessamento.', false); }
+  finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Reprocessar';
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadCategories();
+</script>
+
+<style>
+.hover-row:hover { background: #f8f9fa; }
+</style>
+{% endblock %}

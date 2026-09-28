@@ -1,0 +1,557 @@
+{% extends "base.html" %}
+{% block title %}Análise de Performance de Backups{% endblock %}
+
+{% block content %}
+<style>
+.tl-wrap { display:flex; flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto;
+  gap:2px; padding:8px 4px; background:var(--bs-light); border-radius:6px; min-height:52px;
+  align-items:flex-end; scrollbar-width:thin; width:100%; max-width:100%; }
+.tl-bar { flex:1 1 0; min-width:3px; max-width:16px; border-radius:3px 3px 0 0; cursor:pointer;
+  transition:opacity .12s; position:relative; }
+.tl-bar:hover { opacity:.7; }
+.tl-Success { background:#198754; } .tl-Warning { background:#ffc107; } .tl-Failed { background:#dc3545; }
+#tl-tooltip { position:fixed; background:#1e2230; color:#f0f4ff; padding:8px 12px; border-radius:6px;
+  font-size:.78rem; line-height:1.5; pointer-events:none; z-index:9999; max-width:320px; display:none;
+  box-shadow:0 4px 16px rgba(0,0,0,.35); }
+.exec-table th { font-size:.78rem; white-space:nowrap; } .exec-table td { font-size:.79rem; vertical-align:middle; }
+.detail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:.5rem 1.5rem; }
+.detail-field { display:flex; flex-direction:column; }
+.detail-label { font-size:.68rem; color:#6c757d; font-weight:600; text-transform:uppercase; }
+.detail-value { font-size:.8rem; color:#212529; word-break:break-all; }
+#routine-dropdown { position:absolute; z-index:1000; width:100%; max-height:280px; overflow-y:auto;
+  background:#fff; border:1px solid #dee2e6; border-radius:0 0 6px 6px; box-shadow:0 4px 12px rgba(0,0,0,.1); }
+.rt-item { padding:8px 12px; cursor:pointer; border-bottom:1px solid #f0f0f0; font-size:.82rem; }
+.rt-item:hover { background:#f0f5ff; }
+.rt-item .rname { font-weight:600; } .rt-item .rstats { color:#6c757d; font-size:.72rem; }
+.kpi-sm { font-size:.7rem; color:#6c757d; font-weight:600; text-transform:uppercase; }
+.kpi-val { font-size:1.3rem; font-weight:700; line-height:1.1; }
+</style>
+
+<div id="tl-tooltip"></div>
+
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-hdd-stack" style="color:var(--brand-primary)"></i>
+      Análise de Performance de Backups
+    </h4>
+    <p class="text-muted small mb-0">Identifique rotinas (VM) lentas vs. o próprio baseline e incidentes simultâneos.</p>
+  </div>
+</div>
+
+<!-- ═══ FILTROS ═══ -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header d-flex align-items-center justify-content-between py-2">
+    <span class="fw-semibold small"><i class="bi bi-funnel me-1"></i>Filtros</span>
+    <button class="btn btn-sm btn-link text-muted p-0" id="btn-clear"><i class="bi bi-x-circle me-1"></i>Limpar</button>
+  </div>
+  <div class="card-body pb-2">
+    <div class="row g-2 mb-2">
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Cliente</label>
+        <select id="f-client" class="form-select form-select-sm">
+          <option value="">Selecione...</option>
+          {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Data início</label>
+        <input type="date" id="f-date-start" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Data fim</label>
+        <input type="date" id="f-date-end" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Últimas N</label>
+        <input type="number" id="f-last-n" class="form-control form-control-sm" list="lastn-sug"
+               min="1" max="20000" value="100" placeholder="vazio = período">
+        <datalist id="lastn-sug"><option value="50"><option value="100"><option value="200"><option value="500"></datalist>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label form-label-sm mb-1">Resultado</label>
+        <select id="f-result" class="form-select form-select-sm">
+          <option value="">Todos</option><option value="Success">Success</option>
+          <option value="Warning">Warning</option><option value="Failed">Failed</option>
+        </select>
+      </div>
+    </div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-6">
+        <label class="form-label form-label-sm mb-1">Rotina (VM / job) <span class="text-muted">— digite para buscar</span></label>
+        <div class="position-relative">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-hdd"></i></span>
+            <input type="text" id="f-routine-search" class="form-control" placeholder="Ex: SRV-EXEMPLO..." autocomplete="off" disabled>
+            <button class="btn btn-outline-secondary" id="btn-clear-routine" type="button" style="display:none"><i class="bi bi-x"></i></button>
+          </div>
+          <div id="routine-dropdown" style="display:none"></div>
+        </div>
+        <div id="routine-selected" class="mt-1" style="display:none"><span class="badge bg-primary" id="routine-badge"></span></div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Tipo</label>
+        <select id="f-type" class="form-select form-select-sm">
+          <option value="">Todos</option><option value="Full">Full</option><option value="Incremental">Incremental</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label form-label-sm mb-1">Duração mín. (min)</label>
+        <input type="number" id="f-min-dur" class="form-control form-control-sm" min="0" placeholder="0">
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <div class="form-check mb-1">
+          <input class="form-check-input" type="checkbox" id="f-only-slow">
+          <label class="form-check-label small" for="f-only-slow">Só lentos (≥2× mediana)</label>
+        </div>
+      </div>
+    </div>
+    <div class="row g-2 align-items-end">
+      <div class="col">
+        <button class="btn btn-outline-danger btn-sm" id="btn-overview" disabled>
+          <i class="bi bi-graph-up-arrow me-1"></i>Ver lentos do cliente
+        </button>
+        <button class="btn btn-outline-warning btn-sm" id="btn-incidents" disabled>
+          <i class="bi bi-exclamation-triangle me-1"></i>Incidentes simultâneos
+        </button>
+        <button class="btn btn-outline-success btn-sm" id="btn-all-errors" disabled
+                title="Baixa um Excel com TODOS os erros (todas as máquinas) no período selecionado">
+          <i class="bi bi-file-earmark-excel me-1"></i>Erros do cliente (período)
+        </button>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm px-4" id="btn-query" disabled>
+          <i class="bi bi-search me-1"></i>Consultar rotina
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ OVERVIEW DO CLIENTE ═══ -->
+<div id="overview-area" style="display:none">
+  <div class="card shadow-sm mb-4">
+    <div class="card-header py-2 fw-semibold small d-flex justify-content-between">
+      <span><i class="bi bi-graph-up-arrow me-1 text-danger"></i>Rotinas mais lentas do cliente <span id="ov-window" class="text-muted fw-normal"></span></span>
+      <span class="badge bg-danger rounded-pill" id="ov-count">0</span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:420px;overflow-y:auto">
+        <table class="table table-sm table-hover exec-table mb-0">
+          <thead class="table-light sticky-top"><tr>
+            <th>Quando</th><th>Job / VM</th><th>Duração</th><th>Mediana</th><th>×</th><th>+min</th><th>Transf.</th><th>Result.</th>
+          </tr></thead>
+          <tbody id="ov-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ INCIDENTES ═══ -->
+<div id="incidents-area" style="display:none">
+  <div class="card shadow-sm mb-4 border-warning">
+    <div class="card-header py-2 fw-semibold small bg-warning bg-opacity-10 d-flex justify-content-between">
+      <span><i class="bi bi-diagram-3 me-1 text-warning"></i>Incidentes simultâneos — várias VMs lentas na mesma janela (indício de infra/storage)</span>
+      <span class="badge bg-warning text-dark rounded-pill" id="inc-count">0</span>
+    </div>
+    <div class="card-body" id="inc-body"></div>
+  </div>
+</div>
+
+<!-- ═══ RESULTADOS DA ROTINA ═══ -->
+<div id="routine-area" style="display:none">
+  <div class="row g-3 mb-4" id="kpi-row"></div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between py-2">
+      <span class="fw-semibold small"><i class="bi bi-bar-chart-steps me-1"></i>Linha do Tempo <span class="text-muted fw-normal" id="tl-count"></span></span>
+      <div class="d-flex align-items-center gap-3 small">
+        <span><i class="bi bi-square-fill text-success me-1"></i>Success</span>
+        <span><i class="bi bi-square-fill text-warning me-1"></i>Warning</span>
+        <span><i class="bi bi-square-fill text-danger me-1"></i>Failed</span>
+        <span class="text-muted">(altura = duração)</span>
+      </div>
+    </div>
+    <div class="card-body py-2 px-3"><div class="tl-wrap" id="timeline"></div></div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header py-2">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <span class="fw-semibold small"><i class="bi bi-table me-1"></i>Execuções <span class="text-muted fw-normal" id="exec-count"></span></span>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary active" data-sort="recent" onclick="setSort('recent')">Recentes</button>
+            <button class="btn btn-outline-secondary" data-sort="slowest" onclick="setSort('slowest')">Mais lentas</button>
+          </div>
+          <button class="btn btn-sm btn-outline-success" id="btn-excel" onclick="exportExcel()"><i class="bi bi-file-earmark-excel me-1"></i>Excel</button>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end mt-1" id="pag-top"></div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover exec-table mb-0">
+          <thead class="table-light"><tr>
+            <th>Início</th><th>Result.</th><th>Duração</th><th>Processado</th><th>Transf.</th><th>Veloc.</th><th>Tipo</th><th>Motivo</th><th class="text-center">+</th>
+          </tr></thead>
+          <tbody id="exec-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="text-center py-5" style="display:none">
+  <div class="spinner-border text-primary mb-3"></div><p class="text-muted small" id="loading-msg">Consultando...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+'use strict';
+let selRoutine = null, lastExec = null, sortMode = 'recent', searchTimer = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  const today = new Date(), m1 = new Date(); m1.setDate(today.getDate() - 14);
+  document.getElementById('f-date-end').value = fmtDate(today);
+  document.getElementById('f-date-start').value = fmtDate(m1);
+  document.getElementById('f-client').addEventListener('change', onClient);
+  document.getElementById('f-routine-search').addEventListener('input', onSearch);
+  document.getElementById('f-routine-search').addEventListener('blur', () => setTimeout(() => closeDrop(), 200));
+  document.getElementById('btn-clear-routine').addEventListener('click', clearRoutine);
+  document.getElementById('btn-clear').addEventListener('click', clearAll);
+  document.getElementById('btn-query').addEventListener('click', doQuery);
+  document.getElementById('btn-overview').addEventListener('click', doOverview);
+  document.getElementById('btn-incidents').addEventListener('click', doIncidents);
+  document.getElementById('btn-all-errors').addEventListener('click', exportAllErrors);
+  document.addEventListener('mousemove', e => {
+    const tt = document.getElementById('tl-tooltip');
+    if (tt.style.display === 'block') { tt.style.left = (e.clientX + 12) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; }
+  });
+});
+
+function onClient() {
+  clearRoutine();
+  const cid = document.getElementById('f-client').value;
+  document.getElementById('f-routine-search').disabled = !cid;
+  document.getElementById('btn-overview').disabled = !cid;
+  document.getElementById('btn-incidents').disabled = !cid;
+  document.getElementById('btn-all-errors').disabled = !cid;
+  updateQueryBtn();
+}
+
+// ── Autocomplete rotina ──
+function onSearch() {
+  clearTimeout(searchTimer);
+  const q = document.getElementById('f-routine-search').value.trim();
+  if (q.length < 1) { closeDrop(); return; }
+  searchTimer = setTimeout(() => fetchRoutines(q), 280);
+}
+async function fetchRoutines(search) {
+  const cid = document.getElementById('f-client').value;
+  if (!cid) return;
+  try {
+    const r = await fetch(`/api/backups/analytics/routines?client_id=${cid}&search=${encodeURIComponent(search)}&limit=20`);
+    renderDrop(await r.json());
+  } catch { closeDrop(); }
+}
+function renderDrop(list) {
+  const dd = document.getElementById('routine-dropdown');
+  if (!list.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = list.map(j => `
+    <div class="rt-item" onclick='selectRoutine(${JSON.stringify(j).replace(/'/g, "&#39;")})'>
+      <div class="rname">${esc(j.vm_name)} <span class="text-muted">/ ${esc(j.job_name)}</span></div>
+      <div class="rstats">Exec: ${j.total_executions} | <span class="text-danger">Falhas: ${j.failed_count}</span>
+        | Mediana: ${j.median_duration_fmt || '—'}${j.last_execution_fmt ? ' | Última: ' + j.last_execution_fmt : ''}</div>
+    </div>`).join('');
+  dd.style.display = 'block';
+}
+function selectRoutine(j) {
+  selRoutine = j;
+  document.getElementById('f-routine-search').value = `${j.vm_name} / ${j.job_name}`;
+  document.getElementById('btn-clear-routine').style.display = '';
+  document.getElementById('routine-selected').style.display = '';
+  document.getElementById('routine-badge').textContent = `${j.vm_name} / ${j.job_name}`;
+  closeDrop(); updateQueryBtn();
+}
+function clearRoutine() {
+  selRoutine = null;
+  document.getElementById('f-routine-search').value = '';
+  document.getElementById('btn-clear-routine').style.display = 'none';
+  document.getElementById('routine-selected').style.display = 'none';
+  closeDrop(); updateQueryBtn();
+}
+function closeDrop() { document.getElementById('routine-dropdown').style.display = 'none'; }
+function updateQueryBtn() {
+  document.getElementById('btn-query').disabled = !(document.getElementById('f-client').value && selRoutine);
+}
+
+// ── Overview: lentos do cliente ──
+async function doOverview() {
+  const cid = document.getElementById('f-client').value; if (!cid) return;
+  const days = windowDays();
+  setLoading(true, 'Buscando rotinas lentas...');
+  try {
+    const search = document.getElementById('f-routine-search').value.trim();
+    const q = new URLSearchParams({ client_id: cid, last_days: days, ratio: 2.5, extra_min: 30, limit: 200 });
+    if (search && !selRoutine) q.set('search', search);
+    const r = await fetch('/api/backups/analytics/slowest?' + q);
+    const d = await r.json();
+    document.getElementById('overview-area').style.display = '';
+    document.getElementById('ov-window').textContent = `(${d.window_start_fmt ? d.window_start_fmt.split(' ')[0] : ''} → hoje)`;
+    document.getElementById('ov-count').textContent = d.total;
+    const tb = document.getElementById('ov-tbody');
+    if (!d.items.length) { tb.innerHTML = '<tr><td colspan="8" class="text-center text-success py-3">Nenhuma execução anormalmente lenta no período.</td></tr>'; }
+    else tb.innerHTML = d.items.map(e => `<tr>
+      <td class="text-nowrap small">${e.started_at_fmt ? e.started_at_fmt.slice(0,16) : '—'}</td>
+      <td class="small fw-medium">${esc(e.vm_name)} <span class="text-muted">/ ${esc(e.job_name)}</span></td>
+      <td>${e.duration_fmt}</td><td class="text-muted">${e.median_fmt}</td>
+      <td><span class="badge bg-danger">${e.ratio}×</span></td><td>${e.extra_min}min</td>
+      <td class="small">${e.transferred_gb != null ? e.transferred_gb + 'GB' : '—'}</td>
+      <td>${badge(e.result)}</td></tr>`).join('');
+    document.getElementById('overview-area').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  } catch (e) { alert('Erro: ' + e.message); } finally { setLoading(false); }
+}
+
+// ── Incidentes ──
+async function doIncidents() {
+  const cid = document.getElementById('f-client').value; if (!cid) return;
+  setLoading(true, 'Agrupando incidentes...');
+  try {
+    const q = new URLSearchParams({ client_id: cid, last_days: windowDays(), ratio: 2.5, extra_min: 30, bucket_min: 30, min_routines: 3 });
+    const r = await fetch('/api/backups/analytics/incidents?' + q);
+    const d = await r.json();
+    document.getElementById('incidents-area').style.display = '';
+    document.getElementById('inc-count').textContent = d.total;
+    const body = document.getElementById('inc-body');
+    if (!d.incidents.length) { body.innerHTML = '<p class="text-muted small mb-0">Nenhum incidente simultâneo (≥3 VMs lentas na mesma janela).</p>'; }
+    else body.innerHTML = d.incidents.map((inc, i) => `
+      <div class="mb-3 pb-2 ${i < d.incidents.length-1 ? 'border-bottom' : ''}">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="fw-semibold"><i class="bi bi-clock-history me-1 text-warning"></i>${inc.when_fmt}
+            — <span class="text-danger">${inc.n_routines} VMs lentas</span>
+            ${inc.n_failed ? `<span class="badge bg-danger ms-1">${inc.n_failed} falha/aviso</span>` : ''}</span>
+          <span class="small text-muted">+${inc.avg_extra_min}min médio</span>
+        </div>
+        <div class="ms-3 small">${inc.items.map(e => `<span class="d-inline-block me-3 mb-1">
+          <span class="text-muted">${esc(e.vm_name)}</span> <span class="badge bg-light text-dark border">${e.ratio}×</span></span>`).join('')}
+          ${inc.n_routines > inc.items.length ? `<span class="text-muted">+${inc.n_routines - inc.items.length} mais</span>` : ''}</div>
+      </div>`).join('');
+    document.getElementById('incidents-area').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  } catch (e) { alert('Erro: ' + e.message); } finally { setLoading(false); }
+}
+
+// ── Consulta de rotina ──
+async function doQuery() {
+  if (!selRoutine) return;
+  const p = params();
+  setLoading(true, 'Carregando rotina...');
+  try {
+    const [summary, execs] = await Promise.all([fetchSummary(p), fetchExecs(p, 1)]);
+    lastExec = execs;
+    document.getElementById('routine-area').style.display = '';
+    renderSummary(summary); renderTimeline(execs.items); renderTable(execs);
+    document.getElementById('routine-area').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  } catch (e) { alert('Erro: ' + e.message); } finally { setLoading(false); }
+}
+async function fetchSummary(p) {
+  const q = new URLSearchParams({ client_id: p.cid, routine_id: selRoutine.routine_id });
+  if (p.lastN) q.set('last_n', p.lastN); else { if (p.ds) q.set('date_start', p.ds); if (p.de) q.set('date_end', p.de); }
+  const r = await fetch('/api/backups/analytics/routine-summary?' + q);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function fetchExecs(p, page) {
+  const q = new URLSearchParams({ client_id: p.cid, routine_id: selRoutine.routine_id, page, page_size: 100, sort: sortMode });
+  if (p.lastN) q.set('last_n', p.lastN); else { if (p.ds) q.set('date_start', p.ds); if (p.de) q.set('date_end', p.de); }
+  if (p.result) q.set('result', p.result);
+  if (p.type) q.set('backup_type', p.type);
+  if (p.minDur) q.set('min_duration', p.minDur * 60);
+  if (p.onlySlow) q.set('only_slow', '1');
+  const r = await fetch('/api/backups/analytics/executions?' + q);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function renderSummary(d) {
+  const fr = d.failure_rate ?? 0, frc = fr >= 50 ? 'danger' : fr >= 20 ? 'warning' : 'success';
+  const kpis = [
+    ['Execuções', d.total_executions, 'bi-play-circle', 'primary'],
+    ['Mediana (baseline)', d.median_duration_fmt || '—', 'bi-speedometer', 'primary'],
+    ['Máx. duração', d.max_duration_fmt || '—', 'bi-stopwatch', 'danger'],
+    ['Falhas', d.failed_count, 'bi-x-circle', 'danger'],
+    ['Taxa de Falha', fr + '%', 'bi-percent', frc],
+    ['Veloc. média', d.avg_speed_mbps != null ? d.avg_speed_mbps + ' MB/s' : '—', 'bi-lightning', 'secondary'],
+    ['Transf. média', d.avg_transferred_gb != null ? d.avg_transferred_gb + ' GB' : '—', 'bi-hdd', 'secondary'],
+    ['Full / Incr', `${d.full_count} / ${d.incremental_count}`, 'bi-layers', 'secondary'],
+    ['Primeira falha', d.first_failure_fmt || '—', 'bi-calendar-x', d.first_failure_fmt ? 'danger' : 'secondary'],
+    ['Último sucesso', d.last_success_fmt || '—', 'bi-calendar2-check', d.last_success_fmt ? 'success' : 'secondary'],
+  ];
+  document.getElementById('kpi-row').innerHTML = kpis.map(([l, v, ic, c]) => `
+    <div class="col-6 col-md-4 col-xl-2"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3 px-3">
+      <div class="kpi-sm"><i class="bi ${ic} me-1"></i>${l}</div>
+      <div class="kpi-val text-${c} ${String(v).length > 8 ? 'fs-6' : ''}">${v ?? '—'}</div>
+    </div></div></div>`).join('');
+}
+
+// ── Timeline (altura = duração) ──
+function renderTimeline(items) {
+  const strip = document.getElementById('timeline');
+  document.getElementById('tl-count').textContent = `— ${items.length} execução(ões)`;
+  if (!items.length) { strip.innerHTML = '<span class="text-muted small px-2">Sem execuções.</span>'; return; }
+  const maxD = Math.max(...items.map(s => s.duration_seconds || 0), 1);
+  strip.innerHTML = items.map((s, i) => {
+    const h = 12 + Math.round((s.duration_seconds || 0) / maxD * 32);
+    const tip = [`<b>${s.started_at_fmt || '—'}</b>`, `Resultado: <b>${s.result}</b>`,
+      s.duration_fmt ? `Duração: ${s.duration_fmt}` : null,
+      s.transferred_gb != null ? `Transferido: ${s.transferred_gb} GB` : null,
+      s.avg_speed_mbps != null ? `Veloc: ${s.avg_speed_mbps} MB/s` : null,
+      s.backup_type ? `Tipo: ${s.backup_type}` : null].filter(Boolean).join('<br>');
+    return `<span class="tl-bar tl-${s.result}" style="height:${h}px"
+      onmouseenter="showTip('${encodeURIComponent(tip)}')" onmouseleave="hideTip()"
+      onclick="document.querySelector('tr[data-idx=&quot;${i}&quot;]')?.scrollIntoView({behavior:'smooth',block:'center'})"></span>`;
+  }).join('');
+}
+function showTip(enc) { const tt = document.getElementById('tl-tooltip'); tt.innerHTML = decodeURIComponent(enc); tt.style.display = 'block'; }
+function hideTip() { document.getElementById('tl-tooltip').style.display = 'none'; }
+
+// ── Tabela de execuções ──
+function renderTable(data) {
+  const tb = document.getElementById('exec-tbody');
+  document.getElementById('exec-count').textContent = `— ${data.total} total${data.mode === 'last_n' ? ' (últimas)' : ''}` +
+    (data.median_seconds ? ` · mediana ${fmtDur(data.median_seconds)}` : '');
+  if (!data.items.length) { tb.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Nenhuma execução.</td></tr>'; renderPag(data); return; }
+  const med = data.median_seconds || 0;
+  tb.innerHTML = data.items.map((s, i) => {
+    const slow = med && s.duration_seconds && s.duration_seconds >= 2 * med;
+    const motivo = s.reason_raw ? esc(s.reason_raw.slice(0, 50)) + (s.reason_raw.length > 50 ? '…' : '') : '—';
+    return `<tr data-idx="${i}">
+      <td>${s.started_at_fmt || '—'}</td><td>${badge(s.result)}</td>
+      <td class="${slow ? 'text-danger fw-semibold' : ''}">${s.duration_fmt || '—'}${slow ? ' <i class="bi bi-arrow-up"></i>' : ''}</td>
+      <td>${s.processed_gb != null ? s.processed_gb + 'GB' : '—'}</td>
+      <td>${s.transferred_gb != null ? s.transferred_gb + 'GB' : '—'}</td>
+      <td>${s.avg_speed_mbps != null ? s.avg_speed_mbps : '—'}</td>
+      <td><span class="small">${s.backup_type || '—'}</span></td>
+      <td class="text-truncate" style="max-width:200px" title="${esc(s.reason_raw || '')}">${motivo}</td>
+      <td class="text-center"><button class="btn btn-xs btn-outline-secondary py-0 px-1" style="font-size:.75rem" onclick="toggleDetail(${s.id})"><i class="bi bi-plus-lg" id="ic-${s.id}"></i></button></td>
+    </tr>
+    <tr id="dt-${s.id}" style="display:none"><td colspan="9" class="p-3" style="background:#f8f9fa">${detailPanel(s)}</td></tr>`;
+  }).join('');
+  renderPag(data);
+}
+function detailPanel(s) {
+  const f = [['Job', s.job_name], ['VM', s.vm_name], ['Session ID', s.task_session_id], ['Job Session', s.job_session_id],
+    ['Resultado', s.result], ['Início', s.started_at_fmt], ['Fim', s.ended_at_fmt], ['Duração', s.duration_fmt],
+    ['Processado', s.processed_gb != null ? s.processed_gb + ' GB' : null], ['Lido', s.read_gb != null ? s.read_gb + ' GB' : null],
+    ['Transferido', s.transferred_gb != null ? s.transferred_gb + ' GB' : null], ['Velocidade', s.avg_speed_mbps != null ? s.avg_speed_mbps + ' MB/s' : null],
+    ['Tipo', s.backup_type], ['Carga', s.backup_import_id ? '#' + s.backup_import_id : null], ['Importado', s.imported_at_fmt]];
+  const grid = f.filter(([, v]) => v != null && v !== '').map(([l, v]) => `<div class="detail-field"><span class="detail-label">${l}</span><span class="detail-value">${esc(String(v))}</span></div>`).join('');
+  const raw = s.reason_raw ? `<div class="mt-2"><span class="detail-label">Motivo</span><div class="mt-1 p-2 bg-white border rounded font-monospace" style="font-size:.75rem;white-space:pre-wrap">${esc(s.reason_raw)}</div></div>` : '';
+  return `<div class="detail-grid">${grid}</div>${raw}`;
+}
+function toggleDetail(id) {
+  const row = document.getElementById('dt-' + id), ic = document.getElementById('ic-' + id);
+  const open = row.style.display === '';
+  row.style.display = open ? 'none' : ''; ic.className = open ? 'bi bi-plus-lg' : 'bi bi-dash-lg';
+}
+function renderPag(data) {
+  if (data.mode === 'last_n' || data.pages <= 1) { document.getElementById('pag-top').innerHTML = ''; return; }
+  document.getElementById('pag-top').innerHTML = `<small class="text-muted me-2">Pág ${data.page}/${data.pages}</small>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary" onclick="goPage(${data.page-1})" ${data.page<=1?'disabled':''}><i class="bi bi-chevron-left"></i></button>
+      <button class="btn btn-outline-secondary" onclick="goPage(${data.page+1})" ${data.page>=data.pages?'disabled':''}><i class="bi bi-chevron-right"></i></button>
+    </div>`;
+}
+async function goPage(page) {
+  setLoading(true, 'Página ' + page + '...');
+  try { const d = await fetchExecs(params(), page); lastExec = d; renderTable(d); } catch (e) { alert(e.message); } finally { setLoading(false); }
+}
+function setSort(m) {
+  sortMode = m;
+  document.querySelectorAll('#routine-area [data-sort]').forEach(b => b.classList.toggle('active', b.dataset.sort === m));
+  if (selRoutine) goPage(1);
+}
+
+// ── Export Excel ──
+async function exportExcel() {
+  if (!selRoutine) return;
+  const p = params(), btn = document.getElementById('btn-excel'), orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>...';
+  try {
+    const q = new URLSearchParams({ client_id: p.cid, routine_id: selRoutine.routine_id });
+    if (p.lastN) q.set('last_n', p.lastN); else { if (p.ds) q.set('date_start', p.ds); if (p.de) q.set('date_end', p.de); }
+    if (p.result) q.set('result', p.result);
+    if (p.type) q.set('backup_type', p.type);
+    if (p.minDur) q.set('min_duration', p.minDur * 60);
+    const r = await fetch('/api/backups/analytics/export-excel?' + q);
+    if (!r.ok) throw new Error(await r.text());
+    const blob = await r.blob(); let fn = 'Backups.xlsx';
+    const m = (r.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/); if (m) fn = m[1];
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch (e) { alert('Erro: ' + e.message); } finally { btn.disabled = false; btn.innerHTML = orig; }
+}
+
+// ── Export: TODOS os erros do cliente no período (todas as máquinas) ──
+async function exportAllErrors() {
+  const cid = document.getElementById('f-client').value;
+  if (!cid) return;
+  const ds = document.getElementById('f-date-start').value;
+  const de = document.getElementById('f-date-end').value;
+  const btn = document.getElementById('btn-all-errors'), orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gerando...';
+  try {
+    const q = new URLSearchParams({ client_id: cid });
+    if (ds) q.set('date_start', ds);
+    if (de) q.set('date_end', de);
+    const r = await fetch('/api/backups/analytics/export-all-errors?' + q);
+    if (!r.ok) throw new Error(await r.text());
+    const blob = await r.blob(); let fn = 'Erros_Backup.xlsx';
+    const m = (r.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/); if (m) fn = m[1];
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch (e) { alert('Erro: ' + e.message); } finally { btn.disabled = false; btn.innerHTML = orig; }
+}
+
+// ── Helpers ──
+function params() {
+  return {
+    cid: document.getElementById('f-client').value,
+    ds: document.getElementById('f-date-start').value,
+    de: document.getElementById('f-date-end').value,
+    result: document.getElementById('f-result').value,
+    type: document.getElementById('f-type').value,
+    minDur: parseInt(document.getElementById('f-min-dur').value) || 0,
+    onlySlow: document.getElementById('f-only-slow').checked,
+    lastN: document.getElementById('f-last-n').value || null,
+  };
+}
+function windowDays() {
+  const ds = document.getElementById('f-date-start').value, de = document.getElementById('f-date-end').value;
+  if (ds && de) { const d = Math.ceil((new Date(de) - new Date(ds)) / 86400000); return Math.max(1, Math.min(180, d)); }
+  return 14;
+}
+function clearAll() {
+  ['f-client','f-result','f-type','f-min-dur'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f-last-n').value = '100';
+  document.getElementById('f-only-slow').checked = false;
+  const today = new Date(), m1 = new Date(); m1.setDate(today.getDate() - 14);
+  document.getElementById('f-date-end').value = fmtDate(today); document.getElementById('f-date-start').value = fmtDate(m1);
+  clearRoutine();
+  ['overview-area','incidents-area','routine-area'].forEach(id => document.getElementById(id).style.display = 'none');
+  document.getElementById('f-routine-search').disabled = true;
+  document.getElementById('btn-overview').disabled = true; document.getElementById('btn-incidents').disabled = true;
+  updateQueryBtn();
+}
+function badge(r) {
+  const c = r === 'Success' ? 'success' : r === 'Warning' ? 'warning' : 'danger';
+  const i = r === 'Success' ? 'check-circle-fill' : r === 'Warning' ? 'exclamation-circle-fill' : 'x-circle-fill';
+  return `<span class="badge bg-${c}"><i class="bi bi-${i} me-1"></i>${r}</span>`;
+}
+function fmtDate(d) { return d.toISOString().split('T')[0]; }
+function fmtDur(s) { if (s == null) return '—'; s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), x = s%60; return h ? `${h}h${String(m).padStart(2,'0')}m` : (m ? `${m}m${String(x).padStart(2,'0')}s` : `${x}s`); }
+function setLoading(on, msg) { document.getElementById('loading').style.display = on ? '' : 'none'; if (msg) document.getElementById('loading-msg').textContent = msg; }
+function esc(s) { if (s == null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+</script>
+{% endblock %}

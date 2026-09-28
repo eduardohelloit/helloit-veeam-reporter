@@ -1,0 +1,676 @@
+{% extends "base.html" %}
+{% block title %}Detalhe da Rotina — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+
+<!-- ── Cabeçalho ─────────────────────────────────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-clipboard-data me-2"></i>Detalhe da Rotina
+    </h2>
+    <p class="page-subtitle mb-0">SLA, RPO e histórico de uma rotina de backup específica</p>
+  </div>
+</div>
+
+<!-- ── Nota explicativa ───────────────────────────────────────────────────────── -->
+<div class="alert border-0 py-2 mb-3 small d-flex gap-2" style="background:rgba(124,58,237,.08)">
+  <i class="bi bi-info-circle-fill text-success mt-1 flex-shrink-0"></i>
+  <span>
+    Selecione <strong>cliente</strong> e <strong>período</strong>, carregue as rotinas e escolha uma para
+    ver sua <strong>taxa de sucesso</strong>, <strong>tendência</strong>, <strong>aderência de RPO</strong> das
+    VMs e o histórico de execuções. A análise é feita sobre os eventos de sessão do job (EV190–200) e,
+    no drill-down, sobre as tarefas por-VM (EV150) ligadas pela sessão.
+  </span>
+</div>
+
+<!-- ── Filtros ────────────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-12 col-lg-4">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-building me-1 text-muted"></i>Cliente</label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Selecione um cliente…</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-6 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>De</label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+
+      <div class="col-6 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>Até</label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-12 col-lg-4 d-flex gap-1">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnLoadRotinas">
+          <i class="bi bi-search me-1"></i>Listar rotinas
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Limpar">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Seletor de rotina (aparece após listar) -->
+    <div class="row g-2 align-items-end mt-1 d-none" id="rotinaSelectorRow">
+      <div class="col-12 col-lg-8">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-hdd-stack me-1 text-muted"></i>Rotina de backup
+          <span class="badge bg-secondary ms-1" id="rotinaCountBadge">—</span>
+        </label>
+        <select class="form-select form-select-sm" id="selRotina">
+          <option value="">Selecione uma rotina…</option>
+        </select>
+      </div>
+      <div class="col-12 col-lg-4">
+        <input type="text" id="rotinaFilter" class="form-control form-control-sm"
+               placeholder="Filtrar rotinas pelo nome…" autocomplete="off">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Estados ────────────────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-clipboard-data fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Escolha cliente e período e clique em <strong>Listar rotinas</strong></p>
+  <p class="text-muted small">Em seguida selecione a rotina que deseja analisar.</p>
+</div>
+
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Carregando dados da rotina…</p>
+</div>
+
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-3">Nenhuma execução encontrada para esta rotina no período.</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════════════
+     CONTEÚDO DA ROTINA
+     ════════════════════════════════════════════════════════════════════════ -->
+<div id="rotinaContent" class="d-none">
+
+  <!-- Identidade da rotina -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div>
+        <h5 class="mb-0 fw-bold" id="rtName">—</h5>
+        <div class="small text-muted">
+          <span id="rtClient">—</span>
+          <span class="mx-1">·</span>
+          <span id="rtType" class="badge bg-light text-dark border">—</span>
+          <span class="ms-1"><i class="bi bi-hdd-network me-1"></i><span id="rtHost">—</span></span>
+        </div>
+      </div>
+      <div class="text-end">
+        <div class="small text-muted">Última execução</div>
+        <div class="fw-semibold" id="rtLastExec">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLA cards -->
+  <div class="row g-2 mb-3">
+
+    <div class="col-6 col-xl-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #7C3AED">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-graph-up-arrow me-1 text-success"></i>Taxa de Sucesso
+          </div>
+          <div class="kpi-number" id="kpiRate" style="font-size:2rem;color:#7C3AED">—</div>
+          <div class="text-muted" style="font-size:.68rem"><span id="kpiRateSub">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #0d6efd">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-arrow-repeat me-1 text-primary"></i>Execuções
+          </div>
+          <div class="kpi-number text-primary" id="kpiTotal" style="font-size:2rem">—</div>
+          <div class="text-muted" style="font-size:.68rem">
+            <span class="text-success" id="kpiSucc">0</span> ok ·
+            <span class="text-warning" id="kpiWarn">0</span> warn ·
+            <span class="text-danger"  id="kpiFail">0</span> falha
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #6f42c1">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-list-ol me-1" style="color:#6f42c1"></i>Últimas 3
+          </div>
+          <div id="kpiLast3" class="d-flex justify-content-center gap-1 my-1" style="min-height:34px;align-items:center">—</div>
+          <div class="text-muted" style="font-size:.68rem">tendência recente</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-xl-3">
+      <div class="kpi-card card text-center h-100" style="border-top:3px solid #fd7e14">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold" style="font-size:.70rem">
+            <i class="bi bi-clock-history me-1" style="color:#fd7e14"></i>RPO das VMs
+          </div>
+          <div class="kpi-number" id="kpiRpo" style="font-size:1.5rem;color:#fd7e14">—</div>
+          <div class="text-muted" style="font-size:.68rem"><span id="kpiRpoSub">aderência das VMs</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Timeline + Ofensores -->
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-lg-8">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-bar-chart-line me-2 text-muted"></i>Execuções ao longo do tempo
+        </div>
+        <div class="card-body">
+          <div style="height:260px;position:relative">
+            <canvas id="chartTimeline"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-lg-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-tags me-2 text-muted"></i>Ofensores (falhas)
+        </div>
+        <div class="card-body p-2" id="offendersBox" style="max-height:280px;overflow-y:auto">
+          <div class="text-muted small text-center py-4">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Painel de Gestão (JobAction) -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span><i class="bi bi-kanban me-2 text-muted"></i>Gestão da Rotina</span>
+      <span class="small text-muted" id="actionMeta"></span>
+    </div>
+    <div class="card-body py-3">
+      <div class="row g-2">
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold mb-1">Situação</label>
+          <select class="form-select form-select-sm" id="actSituation">
+            <option value="Indefinido">Indefinido</option>
+            <option value="Ativo">Ativo</option>
+            <option value="Instável">Instável</option>
+            <option value="Em observação">Em observação</option>
+            <option value="Superado">Superado</option>
+          </select>
+          <div class="form-text small" id="actSuggest"></div>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold mb-1">Responsável</label>
+          <input type="text" class="form-control form-control-sm" id="actResponsible" maxlength="255" placeholder="Quem está tratando">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold mb-1">Ticket / Chamado</label>
+          <input type="text" class="form-control form-control-sm" id="actTicket" maxlength="255" placeholder="Ex: INC-12345">
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small fw-semibold mb-1">Ação em curso</label>
+          <textarea class="form-control form-control-sm" id="actOngoing" rows="2" placeholder="O que está sendo feito"></textarea>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label small fw-semibold mb-1">Observação técnica</label>
+          <textarea class="form-control form-control-sm" id="actObs" rows="2" placeholder="Detalhes técnicos / causa raiz"></textarea>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end mt-2">
+        <button class="btn btn-sm btn-success" id="btnSaveAction">
+          <i class="bi bi-floppy me-1"></i>Salvar gestão
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drill-down de VMs -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>
+        <i class="bi bi-hdd-network me-2 text-muted"></i>VMs desta rotina (RPO observado × esperado)
+        <span class="badge bg-secondary ms-1" id="vmCountBadge" style="display:none">—</span>
+      </span>
+      <span class="small text-muted">via correlação de sessão (EV150)</span>
+    </div>
+    <div id="vmLoading" class="text-center py-3 d-none">
+      <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+      <span class="text-muted small ms-2">Correlacionando VMs…</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.78rem">
+        <thead class="table-light" style="font-size:.71rem">
+          <tr>
+            <th class="ps-3" style="min-width:180px">Máquina Virtual</th>
+            <th style="width:135px" class="text-center">Último Backup OK</th>
+            <th style="width:90px"  class="text-center">Tarefas</th>
+            <th style="width:110px" class="text-center">RPO Esperado</th>
+            <th style="width:105px" class="text-center">RPO Observado</th>
+            <th style="width:85px"  class="text-center">Desvio</th>
+            <th style="width:115px" class="text-center">Desde último</th>
+            <th style="width:110px" class="text-center">Status</th>
+          </tr>
+        </thead>
+        <tbody id="vmTableBody">
+          <tr><td colspan="8" class="text-center text-muted py-4 small">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Histórico de execuções -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>
+        <i class="bi bi-clock-history me-2 text-muted"></i>Histórico de execuções
+        <span class="badge bg-secondary ms-1" id="histCountBadge" style="display:none">—</span>
+      </span>
+      <input type="text" id="histFilter" class="form-control form-control-sm" style="width:220px"
+             placeholder="Filtrar mensagem…" autocomplete="off">
+    </div>
+    <div style="overflow-x:auto;max-height:480px;overflow-y:auto">
+      <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.78rem">
+        <thead class="table-light" style="font-size:.71rem;position:sticky;top:0;z-index:1">
+          <tr>
+            <th class="ps-3" style="width:140px">Data/Hora</th>
+            <th style="width:90px"  class="text-center">Resultado</th>
+            <th>Mensagem</th>
+          </tr>
+        </thead>
+        <tbody id="histTableBody">
+          <tr><td colspan="3" class="text-center text-muted py-4 small">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /rotinaContent -->
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// Detalhe da Rotina
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function fmt(n)  { return (n ?? 0).toLocaleString('pt-BR'); }
+function esc(s)  {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtH(h) {
+  if (h === null || h === undefined) return '—';
+  h = parseFloat(h); if (isNaN(h)) return '—';
+  const d = Math.floor(h/24), hr = Math.floor(h%24), m = Math.round((h*60)%60);
+  if (d>0) return `${d}d ${hr}h ${m}m`;
+  if (hr>0) return `${hr}h ${m}m`;
+  return `${m}m`;
+}
+function fmtMin(mins){ if(!mins) return '—'; return fmtH(mins/60); }
+function todayStr()   { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; }
+function setDefaultDates(){
+  document.getElementById('dateStart').value = daysAgoStr(30);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+
+const RESULT_LABEL = {0:'Sucesso',1:'Warning',2:'Falha'};
+function resultBadge(r){
+  if (r===0) return `<span class="badge bg-success" style="font-size:.68rem">Sucesso</span>`;
+  if (r===1) return `<span class="badge bg-warning text-dark" style="font-size:.68rem">Warning</span>`;
+  if (r===2) return `<span class="badge bg-danger" style="font-size:.68rem">Falha</span>`;
+  return `<span class="badge bg-secondary" style="font-size:.68rem">—</span>`;
+}
+function resultDot(r){
+  const base='display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#fff;font-size:.8rem';
+  if (r===0) return `<span title="Sucesso" style="${base};background:#7C3AED"><i class="bi bi-check-lg"></i></span>`;
+  if (r===1) return `<span title="Warning" style="${base};background:#ffc107;color:#000"><i class="bi bi-exclamation"></i></span>`;
+  if (r===2) return `<span title="Falha" style="${base};background:#dc3545"><i class="bi bi-x-lg"></i></span>`;
+  return `<span title="—" style="${base};background:#adb5bd"><i class="bi bi-dash"></i></span>`;
+}
+function rpoStatusBadge(st){
+  const MAP={
+    ok:`<span class="badge" style="background:#198754;font-size:.68rem">Dentro do RPO</span>`,
+    attention:`<span class="badge bg-warning text-dark" style="font-size:.68rem">Atenção</span>`,
+    critical:`<span class="badge bg-danger" style="font-size:.68rem">Fora do RPO</span>`,
+    no_history:`<span class="badge bg-secondary" style="font-size:.68rem">Hist. insuf.</span>`,
+    no_backup:`<span class="badge" style="background:#842029;color:#fff;font-size:.68rem">Sem backup</span>`,
+  };
+  return MAP[st]||`<span class="badge bg-light text-dark">${esc(st)}</span>`;
+}
+
+// ── Estado ──────────────────────────────────────────────────────────────────
+let _rotinas = [];
+let _history = [];
+let _timelineChart = null;
+
+function showWaiting(){
+  document.getElementById('waitingState').classList.remove('d-none');
+  ['emptyState','rotinaContent','loadingOverlay'].forEach(id=>document.getElementById(id).classList.add('d-none'));
+}
+
+// ── Listar rotinas ──────────────────────────────────────────────────────────
+async function loadRotinas(){
+  const clientId  = document.getElementById('selClient').value;
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  if (!clientId)              { alert('Selecione um cliente.'); return; }
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final.'); return; }
+
+  const btn = document.getElementById('btnLoadRotinas');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Carregando…';
+
+  const params = new URLSearchParams({ client_id: clientId, date_start: dateStart, date_end: dateEnd });
+  try {
+    const resp = await fetch('/api/rotina-list?' + params);
+    if (!resp.ok){ const e=await resp.json().catch(()=>({})); alert(e.error||'Erro ao listar rotinas.'); return; }
+    const data = await resp.json();
+    _rotinas = data.rotinas || [];
+    renderRotinaSelect(_rotinas);
+    document.getElementById('rotinaSelectorRow').classList.remove('d-none');
+    document.getElementById('rotinaCountBadge').textContent = `${data.total} rotina(s)`;
+    // reset detail
+    document.getElementById('rotinaContent').classList.add('d-none');
+    document.getElementById('emptyState').classList.add('d-none');
+    if (_rotinas.length === 0) {
+      document.getElementById('waitingState').classList.remove('d-none');
+    } else {
+      document.getElementById('waitingState').classList.add('d-none');
+    }
+  } catch(e){ console.error(e); alert('Erro ao listar rotinas.'); }
+  finally { btn.disabled=false; btn.innerHTML='<i class="bi bi-search me-1"></i>Listar rotinas'; }
+}
+
+function renderRotinaSelect(list){
+  const sel = document.getElementById('selRotina');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Selecione uma rotina…</option>' + list.map(r => {
+    const rate = r.success_rate;
+    const flag = rate >= 100 ? '✅' : rate >= 80 ? '⚠️' : '🔴';
+    return `<option value="${esc(r.job_name)}">${flag} ${esc(r.job_name)} — ${rate}% (${r.total} exec)</option>`;
+  }).join('');
+  if (cur) sel.value = cur;
+}
+
+// ── Filtro do select de rotinas ─────────────────────────────────────────────
+document.getElementById('rotinaFilter')?.addEventListener('input', function(){
+  const s = this.value.trim().toLowerCase();
+  const filtered = s ? _rotinas.filter(r => r.job_name.toLowerCase().includes(s)) : _rotinas;
+  renderRotinaSelect(filtered);
+});
+
+// ── Carregar detalhe da rotina ──────────────────────────────────────────────
+async function loadDetail(){
+  const clientId  = document.getElementById('selClient').value;
+  const jobName   = document.getElementById('selRotina').value;
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  if (!jobName) return;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+  document.getElementById('rotinaContent').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+
+  const params = new URLSearchParams({ client_id: clientId, job_name: jobName, date_start: dateStart, date_end: dateEnd });
+  try {
+    const resp = await fetch('/api/rotina-detail?' + params);
+    if (!resp.ok){ const e=await resp.json().catch(()=>({})); alert(e.error||'Erro.'); showWaiting(); return; }
+    const data = await resp.json();
+    if (!data.found){
+      document.getElementById('loadingOverlay').classList.add('d-none');
+      document.getElementById('emptyState').classList.remove('d-none');
+      return;
+    }
+    renderDetail(data);
+    document.getElementById('rotinaContent').classList.remove('d-none');
+    loadVMs(); // drill-down em paralelo
+  } catch(e){ console.error(e); showWaiting(); }
+  finally { document.getElementById('loadingOverlay').classList.add('d-none'); }
+}
+
+function renderDetail(d){
+  const k = d.kpis;
+  document.getElementById('rtName').textContent   = d.job_name;
+  document.getElementById('rtClient').textContent = d.client_name || '—';
+  const typeEl = document.getElementById('rtType');
+  typeEl.textContent = d.job_type === 'log_backup' ? 'Log Backup' : 'Backup';
+  document.getElementById('rtHost').textContent   = d.vbr_hostname || '—';
+  document.getElementById('rtLastExec').innerHTML = `${esc(k.last_execution)} ${resultBadge(k.last_result)}`;
+
+  // SLA
+  document.getElementById('kpiRate').textContent    = k.success_rate + '%';
+  document.getElementById('kpiRateSub').textContent = `${fmt(k.success)} de ${fmt(k.total)} com sucesso`;
+  const rateEl = document.getElementById('kpiRate');
+  rateEl.style.color = k.success_rate >= 100 ? '#7C3AED' : k.success_rate >= 80 ? '#fd7e14' : '#dc3545';
+
+  document.getElementById('kpiTotal').textContent = fmt(k.total);
+  document.getElementById('kpiSucc').textContent  = fmt(k.success);
+  document.getElementById('kpiWarn').textContent  = fmt(k.warning);
+  document.getElementById('kpiFail').textContent  = fmt(k.failed);
+
+  document.getElementById('kpiLast3').innerHTML = (k.last3 && k.last3.length)
+    ? k.last3.map(resultDot).join('') : '<span class="text-muted small">sem dados</span>';
+
+  // Ofensores
+  renderOffenders(d.offenders || []);
+
+  // Timeline
+  renderTimeline(d.timeline || []);
+
+  // Gestão
+  const a = d.action || {};
+  document.getElementById('actSituation').value   = a.situation || 'Indefinido';
+  document.getElementById('actResponsible').value = a.responsible || '';
+  document.getElementById('actTicket').value      = a.ticket || '';
+  document.getElementById('actOngoing').value     = a.action_ongoing || '';
+  document.getElementById('actObs').value         = a.technical_observation || '';
+  document.getElementById('actSuggest').innerHTML = d.suggested_situation
+    ? `Sugestão automática: <strong>${esc(d.suggested_situation)}</strong>` : '';
+  document.getElementById('actionMeta').textContent =
+    a.updated_at ? `Atualizado em ${a.updated_at}${a.updated_by ? ' por ' + a.updated_by : ''}` : 'Sem registro de gestão ainda';
+
+  // Histórico
+  _history = d.history || [];
+  document.getElementById('histFilter').value = '';
+  renderHistory(_history);
+}
+
+function renderOffenders(list){
+  const box = document.getElementById('offendersBox');
+  if (!list.length){ box.innerHTML = '<div class="text-muted small text-center py-4">Sem falhas no período 🎉</div>'; return; }
+  const totalFail = list.reduce((s,o)=>s+o.count,0);
+  box.innerHTML = list.map(o => {
+    const pct = totalFail ? Math.round(o.count/totalFail*100) : 0;
+    return `<div class="mb-2">
+      <div class="d-flex justify-content-between align-items-center small">
+        <span><span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:${esc(o.color)}"></span>${esc(o.category)}</span>
+        <span class="fw-semibold">${fmt(o.count)} <span class="text-muted">(${pct}%)</span></span>
+      </div>
+      <div class="progress mt-1" style="height:5px">
+        <div class="progress-bar" style="width:${pct}%;background:${esc(o.color)}"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderTimeline(tl){
+  const ctx = document.getElementById('chartTimeline');
+  const labels = tl.map(t => { const [y,m,dd]=t.day.split('-'); return `${dd}/${m}`; });
+  const succ = tl.map(t=>t.success), warn = tl.map(t=>t.warning), fail = tl.map(t=>t.failed);
+  if (_timelineChart) _timelineChart.destroy();
+  _timelineChart = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets:[
+      { label:'Sucesso', data:succ, backgroundColor:'#7C3AED', stack:'s' },
+      { label:'Warning', data:warn, backgroundColor:'#ffc107', stack:'s' },
+      { label:'Falha',   data:fail, backgroundColor:'#dc3545', stack:'s' },
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      scales:{ x:{ stacked:true, ticks:{ font:{size:10} } },
+               y:{ stacked:true, beginAtZero:true, ticks:{ precision:0, font:{size:10} } } },
+      plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } },
+    }
+  });
+}
+
+function renderHistory(list){
+  const tbody = document.getElementById('histTableBody');
+  document.getElementById('histCountBadge').textContent = `${list.length}`;
+  document.getElementById('histCountBadge').style.display = '';
+  if (!list.length){ tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4 small">Sem execuções.</td></tr>'; return; }
+  tbody.innerHTML = list.map(h => {
+    const retry = h.will_be_retried ? ' <span class="badge bg-light text-dark border" style="font-size:.6rem">retry</span>' : '';
+    const msg = h.message ? esc(h.message) : '<span class="text-muted">—</span>';
+    return `<tr>
+      <td class="ps-3 small">${esc(h.time)}</td>
+      <td class="text-center">${resultBadge(h.result)}${retry}</td>
+      <td class="small" style="white-space:pre-wrap;max-width:680px">${msg}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('histFilter').addEventListener('input', function(){
+  const s = this.value.trim().toLowerCase();
+  renderHistory(s ? _history.filter(h => (h.message||'').toLowerCase().includes(s)) : _history);
+});
+
+// ── Drill-down de VMs ───────────────────────────────────────────────────────
+async function loadVMs(){
+  const clientId  = document.getElementById('selClient').value;
+  const jobName   = document.getElementById('selRotina').value;
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+
+  document.getElementById('vmLoading').classList.remove('d-none');
+  document.getElementById('vmTableBody').style.opacity = '0.4';
+
+  const params = new URLSearchParams({ client_id: clientId, job_name: jobName, date_start: dateStart, date_end: dateEnd });
+  try {
+    const resp = await fetch('/api/rotina-vms?' + params);
+    if (!resp.ok){ console.error('rotina-vms error'); return; }
+    const data = await resp.json();
+    renderVMs(data.vms || []);
+
+    const s = data.summary || {};
+    const okN = s.ok||0, attN = s.attention||0, badN = (s.critical||0)+(s.no_backup||0);
+    document.getElementById('kpiRpo').innerHTML =
+      `<span class="text-success">${okN}</span> / <span class="text-warning">${attN}</span> / <span class="text-danger">${badN}</span>`;
+    document.getElementById('kpiRpoSub').textContent = 'dentro / atenção / fora';
+
+    const badge = document.getElementById('vmCountBadge');
+    badge.textContent = `${data.total} VM(s)`; badge.style.display='';
+  } catch(e){ console.error('loadVMs:', e); }
+  finally {
+    document.getElementById('vmLoading').classList.add('d-none');
+    document.getElementById('vmTableBody').style.opacity = '1';
+  }
+}
+
+function renderVMs(vms){
+  const tbody = document.getElementById('vmTableBody');
+  if (!vms.length){
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4 small">
+      Nenhuma VM correlacionada. (Drill-down depende de dados XML/EVTX com GUID de sessão.)</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = vms.map(vm => {
+    const obsColor = vm.status==='ok'?'text-success':vm.status==='attention'?'text-warning fw-semibold':vm.status==='critical'?'text-danger fw-bold':'text-muted';
+    const obsCell = vm.avg_rpo_h!==null ? `<span class="${obsColor}">${fmtH(vm.avg_rpo_h)}</span>` : '<span class="text-muted fst-italic small">—</span>';
+    const expIcon = vm.rpo_source==='configured' ? '' : ' <i class="bi bi-gear text-muted" title="RPO padrão global" style="font-size:.65rem"></i>';
+    let devCell = '—';
+    if (vm.deviation_pct!==null){
+      const dc = vm.deviation_pct<=0?'text-success':vm.deviation_pct<=50?'text-warning':'text-danger fw-bold';
+      const sg = vm.deviation_pct>0?'+':'';
+      devCell = `<span class="${dc}">${sg}${vm.deviation_pct}%</span>`;
+    }
+    let sinceCell = fmtH(vm.since_h);
+    if (vm.since_h!==null){
+      const sh=parseFloat(vm.since_h);
+      if (sh>48) sinceCell=`<span class="text-danger fw-semibold">${sinceCell}</span>`;
+      else if (sh>24) sinceCell=`<span class="text-warning fw-semibold">${sinceCell}</span>`;
+    }
+    const tasks = `<span class="text-success">${vm.success_count}</span>${vm.failed_count?` / <span class="text-danger">${vm.failed_count}</span>`:''}`;
+    return `<tr>
+      <td class="ps-3 fw-semibold small text-truncate" style="max-width:180px" title="${esc(vm.vm_name)}">${esc(vm.vm_name)}</td>
+      <td class="text-center small">${vm.last_backup?esc(vm.last_backup):'<span class="text-muted">—</span>'}</td>
+      <td class="text-center small">${tasks}</td>
+      <td class="text-center small fw-semibold">${fmtMin(vm.expected_minutes)}${expIcon}</td>
+      <td class="text-center fw-semibold">${obsCell}</td>
+      <td class="text-center small">${devCell}</td>
+      <td class="text-center small">${sinceCell}</td>
+      <td class="text-center">${rpoStatusBadge(vm.status)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Salvar gestão (JobAction) ───────────────────────────────────────────────
+document.getElementById('btnSaveAction').addEventListener('click', async () => {
+  const clientId = parseInt(document.getElementById('selClient').value);
+  const jobName  = document.getElementById('selRotina').value;
+  if (!jobName){ alert('Selecione uma rotina.'); return; }
+  const btn = document.getElementById('btnSaveAction');
+  btn.disabled=true; btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Salvando…';
+  try {
+    const resp = await fetch('/api/rotina-action', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        client_id: clientId, job_name: jobName,
+        situation: document.getElementById('actSituation').value,
+        responsible: document.getElementById('actResponsible').value.trim(),
+        ticket: document.getElementById('actTicket').value.trim(),
+        action_ongoing: document.getElementById('actOngoing').value.trim(),
+        technical_observation: document.getElementById('actObs').value.trim(),
+      }),
+    });
+    const data = await resp.json();
+    if (data.ok){
+      document.getElementById('actionMeta').textContent =
+        `Atualizado em ${data.updated_at}${data.updated_by ? ' por ' + data.updated_by : ''}`;
+      btn.innerHTML='<i class="bi bi-check-lg me-1"></i>Salvo!';
+      setTimeout(()=>{ btn.innerHTML='<i class="bi bi-floppy me-1"></i>Salvar gestão'; btn.disabled=false; }, 1400);
+    } else { alert(data.error||'Erro ao salvar.'); btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy me-1"></i>Salvar gestão'; }
+  } catch(e){ alert('Erro ao salvar gestão.'); btn.disabled=false; btn.innerHTML='<i class="bi bi-floppy me-1"></i>Salvar gestão'; }
+});
+
+// ── Controles ───────────────────────────────────────────────────────────────
+document.getElementById('btnLoadRotinas').addEventListener('click', loadRotinas);
+document.getElementById('selRotina').addEventListener('change', loadDetail);
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value = '';
+  document.getElementById('selRotina').innerHTML = '<option value="">Selecione uma rotina…</option>';
+  document.getElementById('rotinaFilter').value = '';
+  document.getElementById('rotinaSelectorRow').classList.add('d-none');
+  setDefaultDates(); showWaiting();
+});
+
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

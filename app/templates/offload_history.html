@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Histórico de Importações Offload — Veeam Reporter{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-clock-history me-2"></i>Histórico de Importações — Offload
+    </h2>
+    <p class="page-subtitle mb-0">Todas as importações de arquivos NDJSON de Offload / Capacity Tier.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/offload/import" class="btn btn-primary btn-sm">
+      <i class="bi bi-upload me-1"></i>Nova importação
+    </a>
+  </div>
+</div>
+
+<!-- Filtro por cliente -->
+{% if clients %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="d-flex align-items-center gap-2 flex-wrap">
+      <label class="small fw-semibold text-muted flex-shrink-0">
+        <i class="bi bi-funnel me-1"></i>Filtrar por cliente:
+      </label>
+      <select name="client_id" class="form-select form-select-sm" style="max-width:280px"
+              onchange="this.form.submit()">
+        <option value="">Todos os clientes</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>
+          {{ c.name }}
+        </option>
+        {% endfor %}
+      </select>
+      {% if selected_client_id %}
+      <a href="/offload/history" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-x me-1"></i>Limpar
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if imports %}
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>Cliente</th>
+          <th>Arquivo</th>
+          <th class="text-center">Linhas</th>
+          <th class="text-center">Novas</th>
+          <th class="text-center">Dup.</th>
+          <th class="text-center">Falhas</th>
+          <th>Período detectado</th>
+          <th>Importado em</th>
+          <th class="text-center">Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for imp in imports %}
+        <tr>
+          <td class="fw-semibold">
+            <i class="bi bi-building me-1 text-muted"></i>
+            {{ imp.client.name if imp.client else '—' }}
+          </td>
+          <td class="small text-muted">
+            <i class="bi bi-file-earmark-text me-1"></i>{{ imp.original_filename }}
+          </td>
+          <td class="text-center">{{ (imp.total_lines or 0) | format_number }}</td>
+          <td class="text-center">
+            <span class="text-success fw-semibold">
+              +{{ (imp.inserted_sessions or 0) | format_number }}
+            </span>
+          </td>
+          <td class="text-center text-muted small">
+            {{ (imp.duplicate_sessions or 0) | format_number }}
+          </td>
+          <td class="text-center">
+            {% if imp.failed_count %}
+            <span class="text-danger fw-semibold">{{ imp.failed_count | format_number }}</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="small">
+            {% if imp.min_started_at and imp.max_started_at %}
+            <i class="bi bi-calendar-range me-1 text-primary"></i>
+            {{ imp.min_started_at.strftime('%d/%m/%Y') }} →
+            {{ imp.max_started_at.strftime('%d/%m/%Y') }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="small text-muted">
+            {{ imp.imported_at.strftime('%d/%m/%Y %H:%M') if imp.imported_at else '—' }}
+            {% if imp.uploaded_by %}
+            <br><span class="text-muted">por {{ imp.uploaded_by }}</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if imp.status == 'completed' %}
+            <span class="badge bg-success">Concluído</span>
+            {% elif imp.status == 'failed' %}
+            <span class="badge bg-danger" title="{{ imp.status_message }}">Erro</span>
+            {% else %}
+            <span class="badge bg-warning text-dark">Processando</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              {% if imp.status == 'completed' %}
+              <a href="/offload/{{ imp.id }}/summary" class="btn btn-outline-primary btn-sm py-0"
+                 title="Ver resumo">
+                <i class="bi bi-list-check"></i>
+              </a>
+              {% elif imp.status == 'processing' %}
+              <a href="/offload/processing/{{ imp.id }}" class="btn btn-outline-warning btn-sm py-0"
+                 title="Acompanhar processamento">
+                <i class="bi bi-hourglass-split"></i>
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  Nenhuma importação de offload encontrada.
+  <a href="/offload/import" class="alert-link">Faça o upload</a> de um arquivo NDJSON para começar.
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}VMs Não Localizadas — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-question-octagon" style="color:var(--brand-primary)"></i>
+      VMs Não Localizadas
+    </h4>
+    <p class="text-muted small mb-0">
+      Backups que falharam porque a VM foi removida/não localizada no cluster
+      (nome extraído da mensagem do Veeam).
+    </p>
+  </div>
+  {% if selected_client_id and recs %}
+  <a class="btn btn-outline-success btn-sm"
+     href="/analytics/vm-missing/export-excel?client_id={{ selected_client_id }}{% if f.date_start %}&date_start={{ f.date_start }}{% endif %}{% if f.date_end %}&date_end={{ f.date_end }}{% endif %}">
+    <i class="bi bi-file-earmark-excel me-1"></i>Excel
+  </a>
+  {% endif %}
+</div>
+
+<div class="card shadow-sm mb-3"><div class="card-body py-3">
+  <form method="get" action="/analytics/vm-missing" class="d-flex align-items-end gap-2 flex-wrap">
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+      <select name="client_id" class="form-select form-select-sm" style="min-width:220px" onchange="this.form.submit()">
+        <option value="">Selecione o cliente...</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">De</label>
+      <input type="date" name="date_start" value="{{ f.date_start or '' }}" class="form-control form-control-sm">
+    </div>
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">Até</label>
+      <input type="date" name="date_end" value="{{ f.date_end or '' }}" class="form-control form-control-sm">
+    </div>
+    <button class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Filtrar</button>
+  </form>
+</div></div>
+
+{% if not selected_client_id %}
+  <div class="alert alert-light border">Selecione um cliente para ver as VMs não localizadas.</div>
+{% elif not recs %}
+  <div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Nenhum backup com erro de VM não localizada no período.</div>
+{% else %}
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h6 class="fw-bold mb-0">Ocorrências</h6>
+          <span class="text-muted small">{{ recs|length }} erro(s)</span>
+        </div>
+        <div class="table-responsive" style="max-height:520px;overflow:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light sticky-top"><tr>
+              <th>Data</th><th>Hora</th><th>Rotina</th><th>VM não localizada</th>
+            </tr></thead>
+            <tbody>
+              {% for r in recs %}
+              <tr title="{{ r.reason }}">
+                <td class="small">{{ r.date }}</td>
+                <td class="small text-muted">{{ r.time }}</td>
+                <td class="small">{{ r.job }}</td>
+                <td class="small fw-semibold">{{ r.vm }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div></div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <h6 class="fw-bold mb-3">Resumo por VM ({{ summary|length }})</h6>
+        <div class="table-responsive" style="max-height:520px;overflow:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light sticky-top"><tr>
+              <th>VM</th><th class="text-end">Ocor.</th><th>Período</th>
+            </tr></thead>
+            <tbody>
+              {% for s in summary %}
+              <tr title="Rotina(s): {{ s.jobs }}">
+                <td class="small fw-semibold">{{ s.vm }}</td>
+                <td class="text-end"><span class="badge bg-danger">{{ s.n }}</span></td>
+                <td class="small text-muted">{{ s.first }}{% if s.last != s.first %} – {{ s.last }}{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="alert alert-light border py-2 small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    Fonte: coletor PowerShell de performance. A falha é no nível do job (a VM sumiu),
+    então o nome da VM é extraído da mensagem. Passe o mouse numa linha para ver o motivo completo.
+    "_MIGRADO" no nome costuma indicar VM renomeada/migrada — a rotina ainda aponta pro nome antigo.
+  </div>
+{% endif %}
+{% endblock %}

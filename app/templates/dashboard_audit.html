@@ -1,0 +1,959 @@
+{% extends "base.html" %}
+{% block title %}Auditoria de Jobs — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-pencil-square me-2"></i>Auditoria de Jobs
+    </h2>
+    <p class="page-subtitle mb-0">
+      O que mudou? Quem alterou? Quando? Qual job foi afetado? Há relação com falhas de backup?
+    </p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-outline-success btn-sm" id="btnExportExcel" style="display:none">
+      <i class="bi bi-file-earmark-excel me-1"></i>Exportar Excel
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" id="btnExportPptx" style="display:none">
+      <i class="bi bi-file-earmark-ppt me-1"></i>Slide PPTX
+    </button>
+  </div>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <!-- Cliente -->
+      <div class="col-12 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-building me-1 text-muted"></i>Cliente
+        </label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- De / Até -->
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>De</label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-calendar-date me-1 text-muted"></i>Até</label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <!-- Disponível no banco (badge + botão período completo) -->
+      <div class="col-12 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-database me-1 text-muted"></i>Base histórica
+        </label>
+        <div id="availBadge" class="d-flex align-items-center gap-1 flex-wrap" style="min-height:31px">
+          <span class="badge bg-light text-muted border" style="font-size:.7rem">
+            <i class="bi bi-hourglass-split me-1"></i>Carregando…
+          </span>
+        </div>
+      </div>
+
+      <!-- Tipo de evento -->
+      <div class="col-6 col-sm-3 col-lg-1">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-funnel me-1 text-muted"></i>Tipo</label>
+        <select class="form-select form-select-sm" id="selEventType">
+          <option value="all">Todos</option>
+          <option value="job_created">Job Criado</option>
+          <option value="job_updated">Config. Alteradas</option>
+          <option value="job_deleted">Job Excluído</option>
+          <option value="objects_added">Obj. Adicionados</option>
+          <option value="objects_changed">Obj. Alterados</option>
+          <option value="objects_deleted">Obj. Removidos</option>
+        </select>
+      </div>
+
+      <!-- Job / Operador / VBR -->
+      <div class="col-6 col-sm-3 col-lg-1">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-hdd-network me-1 text-muted"></i>Job</label>
+        <input type="text" class="form-control form-control-sm" id="filterJob" placeholder="Nome…">
+      </div>
+      <div class="col-6 col-sm-3 col-lg-1">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-person me-1 text-muted"></i>Operador</label>
+        <input type="text" class="form-control form-control-sm" id="filterOperator" placeholder="Usuário…">
+      </div>
+      <div class="col-6 col-sm-3 col-lg-1">
+        <label class="form-label small fw-semibold mb-1"><i class="bi bi-server me-1 text-muted"></i>VBR</label>
+        <input type="text" class="form-control form-control-sm" id="filterVbr" placeholder="Servidor…">
+      </div>
+
+      <!-- Ações -->
+      <div class="col-12 col-lg-auto d-flex gap-1">
+        <button class="btn btn-primary btn-sm" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Limpar filtros">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Estado inicial -->
+<div id="waitingState" class="text-center py-5 d-none">
+  <i class="bi bi-funnel fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione os filtros e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<!-- Loading -->
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Carregando eventos de auditoria…</p>
+</div>
+
+<!-- Empty -->
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-clipboard-x fs-1 text-muted"></i>
+  <p class="text-muted mt-3">
+    Nenhum evento de auditoria encontrado para o período selecionado.<br>
+    <span class="small">Event IDs: 23010, 23050, 23090, 23110, 23130, 32120</span>
+  </p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Dashboard content                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div id="auditContent" class="d-none">
+
+  <!-- ── KPI cards (7) ───────────────────────────────────────────────────── -->
+  <div class="row g-2 mb-3" id="kpiRow">
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100">
+        <div class="card-body py-2">
+          <div class="kpi-number text-dark" id="kpiTotal">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-list-ul me-1"></i>Total</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100 border-success border-opacity-50">
+        <div class="card-body py-2" style="background:rgba(25,135,84,.06)">
+          <div class="kpi-number text-success" id="kpiCreated">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-plus-circle me-1"></i>Jobs criados</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100 border-warning border-opacity-50">
+        <div class="card-body py-2" style="background:rgba(255,193,7,.06)">
+          <div class="kpi-number text-warning" id="kpiUpdated">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-pencil me-1"></i>Config. alteradas</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100 border-danger border-opacity-50">
+        <div class="card-body py-2" style="background:rgba(220,53,69,.06)">
+          <div class="kpi-number text-danger" id="kpiDeleted">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-trash me-1"></i>Jobs excluídos</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100 border-info border-opacity-50">
+        <div class="card-body py-2" style="background:rgba(13,202,240,.06)">
+          <div class="kpi-number text-info" id="kpiObjAdded">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-node-plus me-1"></i>Obj. adicionados</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100" style="border-color:#fd7e14;border-opacity:.5">
+        <div class="card-body py-2" style="background:rgba(253,126,20,.06)">
+          <div class="kpi-number" style="color:#fd7e14" id="kpiObjRemoved">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-node-minus me-1"></i>Obj. removidos</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-sm-4 col-md-3 col-xl">
+      <div class="kpi-card card text-center h-100 border-secondary border-opacity-50">
+        <div class="card-body py-2" style="background:rgba(108,117,125,.06)">
+          <div class="kpi-number text-secondary" id="kpiOperators">—</div>
+          <div class="small text-muted mt-1"><i class="bi bi-people me-1"></i>Operadores</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Alterações sensíveis ────────────────────────────────────────────── -->
+  <div id="sensitivePanelWrap" class="d-none mb-3">
+    <div class="card border-danger shadow-sm">
+      <div class="card-header bg-danger bg-opacity-10 fw-semibold small text-danger d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-triangle-fill me-2"></i>Alterações Sensíveis</span>
+        <span class="badge bg-danger" id="sensitiveCount">0</span>
+      </div>
+      <div class="card-body p-0" style="max-height:240px;overflow-y:auto">
+        <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.76rem">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th class="ps-3" style="width:130px">Data/Hora</th>
+              <th style="width:160px">Tipo</th>
+              <th style="min-width:160px">Job</th>
+              <th style="width:160px">Operador</th>
+              <th style="min-width:120px">Motivo</th>
+              <th style="width:70px" class="text-center">Impacto</th>
+            </tr>
+          </thead>
+          <tbody id="sensitiveTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Charts row ───────────────────────────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Donut -->
+    <div class="col-12 col-lg-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-pie-chart me-2 text-muted"></i>Distribuição por tipo
+        </div>
+        <div class="card-body d-flex flex-column align-items-center justify-content-center" style="min-height:230px">
+          <canvas id="chartDonut" style="max-width:220px"></canvas>
+          <div class="mt-2 w-100" id="donutLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stacked timeline -->
+    <div class="col-12 col-lg-9">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-calendar3 me-2 text-muted"></i>Eventos por dia
+          <span class="text-muted small fw-normal ms-1">(empilhado por tipo)</span>
+        </div>
+        <div class="card-body" style="min-height:230px">
+          <canvas id="chartTimeline"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Rankings row ─────────────────────────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Top jobs -->
+    <div class="col-12 col-lg-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-bar-chart-steps me-2 text-muted"></i>Jobs com mais alterações
+        </div>
+        <div class="card-body" style="min-height:160px">
+          <canvas id="chartTopJobs"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Operator ranking -->
+    <div class="col-12 col-lg-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-person-badge me-2 text-muted"></i>Operadores — quem mais alterou
+        </div>
+        <div class="card-body p-0" style="min-height:160px;overflow-y:auto">
+          <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.76rem">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th class="ps-3">#</th>
+                <th>Operador</th>
+                <th class="text-end pe-3">Alterações</th>
+              </tr>
+            </thead>
+            <tbody id="operatorRankingBody">
+              <tr><td colspan="3" class="text-center text-muted py-3 small">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Events table ─────────────────────────────────────────────────────── -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span><i class="bi bi-table me-2 text-muted"></i>Registro de alterações</span>
+      <div class="d-flex align-items-center gap-2">
+        <input type="text" class="form-control form-control-sm" id="tableSearch"
+               placeholder="Filtrar na página…" style="width:180px">
+        <span class="badge bg-secondary" id="tableCount">0</span>
+      </div>
+    </div>
+    <!-- Quick-filter por tipo de evento -->
+    <div class="px-3 py-2 border-bottom bg-light d-flex align-items-center flex-wrap gap-1" id="eventTypePills">
+      <span class="small text-muted me-1" style="white-space:nowrap">Filtro rápido:</span>
+      <button class="btn btn-sm rounded-pill evt-pill btn-secondary active" data-type="all"
+              style="font-size:.72rem;padding:.18rem .65rem">Todos</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-success" data-type="job_created"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-plus-circle me-1"></i>Job Criado</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-warning" data-type="job_updated"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-pencil me-1"></i>Config. Alteradas</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-danger" data-type="job_deleted"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-trash me-1"></i>Job Excluído</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-info" data-type="objects_added"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-node-plus me-1"></i>Obj. Adicionados</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-warning" data-type="objects_changed"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-arrow-left-right me-1"></i>Obj. Alterados</button>
+      <button class="btn btn-sm rounded-pill evt-pill btn-outline-dark" data-type="objects_deleted"
+              style="font-size:.72rem;padding:.18rem .65rem"><i class="bi bi-node-minus me-1"></i>Obj. Removidos</button>
+    </div>
+    <div class="card-body p-0" style="max-height:480px;overflow-y:auto">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light sticky-top" style="font-size:.74rem">
+          <tr>
+            <th class="ps-3" style="width:130px">Data/Hora</th>
+            <th style="width:160px">Tipo de alteração</th>
+            <th style="min-width:180px">Rotina de Backup</th>
+            <th style="width:160px">Operador</th>
+            <th style="width:140px">Servidor VBR</th>
+            <th style="min-width:180px">Detalhes</th>
+            <th style="width:130px">Origem da carga</th>
+            <th style="width:75px" class="text-center">Impacto</th>
+            <th style="width:48px"></th>
+          </tr>
+        </thead>
+        <tbody id="eventsTableBody">
+          <tr><td colspan="9" class="text-center text-muted py-4 small">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Paginação -->
+    <div class="card-footer py-1 px-3 d-none d-flex align-items-center justify-content-between small text-muted flex-wrap gap-2" id="auditPagination">
+      <span id="auditPaginationInfo"></span>
+      <div class="d-flex align-items-center gap-2">
+        <select class="form-select form-select-sm" id="selPageSize" style="width:auto">
+          <option value="20" selected>20 / página</option>
+          <option value="50">50 / página</option>
+          <option value="100">100 / página</option>
+        </select>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" id="btnAuditFirst" title="Primeira página"><i class="bi bi-chevron-double-left"></i></button>
+          <button class="btn btn-outline-secondary" id="btnAuditPrev" title="Anterior"><i class="bi bi-chevron-left"></i></button>
+          <span class="btn btn-outline-secondary disabled px-2" id="auditPageIndicator"
+                style="pointer-events:none;min-width:72px;text-align:center">—</span>
+          <button class="btn btn-outline-secondary" id="btnAuditNext" title="Próximo"><i class="bi bi-chevron-right"></i></button>
+          <button class="btn btn-outline-secondary" id="btnAuditLast" title="Última página"><i class="bi bi-chevron-double-right"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Info footer ─────────────────────────────────────────────────────── -->
+  <div class="alert alert-light border small">
+    <i class="bi bi-info-circle me-2 text-info"></i>
+    <strong>Event IDs monitorados:</strong>
+    23010 (Job Criado) · 23050 (Config. Alteradas) · 23090 (Job Excluído) ·
+    23110 (Objetos Adicionados) · 23130 (Objetos Alterados) · 32120 (Objetos Removidos).
+    <strong>Impacto Alto</strong> = exclusões ou jobs com falhas de backup no período.
+    <strong>Fora do horário</strong> = antes das 7h ou após 19h.
+  </div>
+
+</div><!-- /auditContent -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Event detail modal                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="modalEventDetail" tabindex="-1" aria-labelledby="modalEventDetailLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="modalEventDetailLabel">
+          <i class="bi bi-file-earmark-text me-2"></i>Detalhe do Evento de Auditoria
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="modalEventBody">
+        <div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+'use strict';
+
+// ── Paleta ───────────────────────────────────────────────────────────────────
+const C = {
+  green:   '#7C3AED', teal: '#A78BFA', orange: '#F97316',
+  red:     '#DC3545', yellow: '#FFC107', blue: '#0D6EFD',
+  gray:    '#718096', border: '#E2E8F0', purple: '#6F42C1',
+};
+
+const TYPE_COLORS = {
+  job_created:     C.green,
+  job_updated:     C.orange,
+  job_deleted:     C.red,
+  objects_added:   C.teal,
+  objects_changed: C.yellow,
+  objects_deleted: '#fd7e14',
+};
+
+const TYPE_BADGE = {
+  job_created:     ['bg-success',           'Job Criado'],
+  job_updated:     ['bg-warning text-dark',  'Config. Alteradas'],
+  job_deleted:     ['bg-danger',             'Job Excluído'],
+  objects_added:   ['bg-info text-dark',     'Obj. Adicionados'],
+  objects_changed: ['bg-warning text-dark',  'Obj. Alterados'],
+  objects_deleted: ['bg-secondary',          'Obj. Removidos'],
+};
+
+const IMPACT_BADGE = {
+  'Alto':  'badge bg-danger',
+  'Médio': 'badge bg-warning text-dark',
+  'Baixo': 'badge bg-success',
+};
+
+Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
+Chart.defaults.font.size   = 12;
+Chart.defaults.color       = '#718096';
+
+const TOOLTIP = {
+  backgroundColor: 'rgba(45,55,72,.92)',
+  titleColor: '#fff', bodyColor: 'rgba(255,255,255,.85)',
+  padding: 10, cornerRadius: 6,
+};
+
+let chartDonut = null, chartTimeline = null, chartTopJobs = null;
+let _auditPage = 1, _auditPageSize = 20, _auditTotalPages = 1;
+
+function fmt(n) { return (n ?? 0).toLocaleString('pt-BR'); }
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── KPIs ─────────────────────────────────────────────────────────────────────
+function updateKPIs(k) {
+  document.getElementById('kpiTotal').textContent     = fmt(k.total);
+  document.getElementById('kpiCreated').textContent   = fmt(k.job_created);
+  document.getElementById('kpiUpdated').textContent   = fmt(k.job_updated);
+  document.getElementById('kpiDeleted').textContent   = fmt(k.job_deleted);
+  document.getElementById('kpiObjAdded').textContent  = fmt(k.objects_added);
+  document.getElementById('kpiObjRemoved').textContent= fmt(k.objects_deleted);
+  document.getElementById('kpiOperators').textContent = fmt(k.operators_count);
+}
+
+// ── Donut ─────────────────────────────────────────────────────────────────────
+function renderDonut(d) {
+  if (chartDonut) { chartDonut.destroy(); chartDonut = null; }
+  if (!d.values.length) return;
+  const colors = d.types.map(t => TYPE_COLORS[t] || C.gray);
+  chartDonut = new Chart(document.getElementById('chartDonut').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: d.labels,
+      datasets: [{ data: d.values, backgroundColor: colors, borderColor: '#fff', borderWidth: 3, hoverOffset: 6 }],
+    },
+    options: {
+      cutout: '62%',
+      plugins: {
+        tooltip: { ...TOOLTIP, callbacks: { label: ctx => ` ${ctx.label}: ${fmt(ctx.raw)}` } },
+        legend: { display: false },
+      },
+      responsive: true, maintainAspectRatio: true,
+    },
+  });
+  document.getElementById('donutLegend').innerHTML = d.labels.map((lbl, i) =>
+    `<div class="d-flex align-items-center gap-2 mb-1 small">
+       <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+       <span class="text-truncate flex-grow-1">${lbl}</span>
+       <span class="ms-auto fw-bold">${fmt(d.values[i])}</span>
+     </div>`
+  ).join('');
+}
+
+// ── Stacked timeline ──────────────────────────────────────────────────────────
+function renderTimeline(d) {
+  if (chartTimeline) { chartTimeline.destroy(); chartTimeline = null; }
+  if (!d.labels.length) return;
+
+  const datasets = (d.datasets || []).map(ds => ({
+    label:           ds.label,
+    data:            ds.data,
+    backgroundColor: ds.color + 'cc',
+    borderColor:     ds.color,
+    borderWidth:     1,
+    borderRadius:    3,
+    stack:           'audit',
+  }));
+
+  chartTimeline = new Chart(document.getElementById('chartTimeline').getContext('2d'), {
+    type: 'bar',
+    data: { labels: d.labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { tooltip: TOOLTIP, legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8 } } },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grid: { color: C.border } },
+      },
+    },
+  });
+  document.getElementById('chartTimeline').style.height = '210px';
+}
+
+// ── Top jobs ──────────────────────────────────────────────────────────────────
+function renderTopJobs(d) {
+  if (chartTopJobs) { chartTopJobs.destroy(); chartTopJobs = null; }
+  if (!d.labels.length) return;
+  const h = Math.max(120, d.labels.length * 26);
+  document.getElementById('chartTopJobs').style.height = h + 'px';
+  chartTopJobs = new Chart(document.getElementById('chartTopJobs').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: d.labels,
+      datasets: [{ label: 'Alterações', data: d.counts,
+        backgroundColor: C.teal + 'cc', borderColor: C.teal, borderWidth: 1, borderRadius: 4 }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { tooltip: TOOLTIP, legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: C.border } },
+        y: { grid: { display: false }, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Operator ranking table ────────────────────────────────────────────────────
+function renderOperatorRanking(d) {
+  const tbody = document.getElementById('operatorRankingBody');
+  if (!d.labels.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3 small">Sem dados.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.labels.map((op, i) => {
+    const pct = d.counts[0] ? Math.round(d.counts[i] / d.counts[0] * 100) : 0;
+    return `<tr>
+      <td class="ps-3 text-muted small">${i + 1}</td>
+      <td class="small fw-semibold">
+        ${esc(op)}
+        <div class="progress mt-1" style="height:4px">
+          <div class="progress-bar bg-primary" style="width:${pct}%"></div>
+        </div>
+      </td>
+      <td class="text-end pe-3 small fw-bold">${fmt(d.counts[i])}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Sensitive changes panel ───────────────────────────────────────────────────
+function renderSensitivePanel(items) {
+  const wrap  = document.getElementById('sensitivePanelWrap');
+  const badge = document.getElementById('sensitiveCount');
+  const tbody = document.getElementById('sensitiveTableBody');
+  if (!items.length) { wrap.classList.add('d-none'); return; }
+
+  wrap.classList.remove('d-none');
+  badge.textContent = items.length >= 50 ? '50+' : items.length;
+
+  tbody.innerHTML = items.map(e => {
+    const [badgeCls, badgeLbl] = TYPE_BADGE[e.event_type] || ['bg-secondary', e.event_label];
+    const impCls = IMPACT_BADGE[e.impact] || 'badge bg-secondary';
+
+    // Build reason flags
+    const reasons = [];
+    if (e.event_type === 'job_deleted' || e.event_type === 'objects_deleted') reasons.push('Exclusão');
+    if (e.after_hours)      reasons.push('<span class="text-warning fw-semibold">Fora do horário</span>');
+    if (e.has_failure_xref) reasons.push('<span class="text-danger fw-semibold">Job com falha</span>');
+
+    return `<tr>
+      <td class="ps-3 small fw-semibold">${esc(e.time)}</td>
+      <td><span class="badge ${badgeCls}" style="font-size:.68rem">${badgeLbl}</span></td>
+      <td class="small fw-semibold text-truncate" style="max-width:160px" title="${esc(e.job_name)}">${esc(e.job_name)}</td>
+      <td class="small text-truncate" style="max-width:160px" title="${esc(e.operator)}">${esc(e.operator)}</td>
+      <td class="small">${reasons.join(' · ') || '—'}</td>
+      <td class="text-center"><span class="${impCls}" style="font-size:.65rem">${esc(e.impact)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Events table ──────────────────────────────────────────────────────────────
+function renderTable(events) {
+  const tbody = document.getElementById('eventsTableBody');
+  document.getElementById('tableCount').textContent = events.length;
+
+  if (!events.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4 small">Nenhum evento encontrado.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = events.map(e => {
+    const [badgeCls, badgeLbl] = TYPE_BADGE[e.event_type] || ['bg-secondary', e.event_label];
+    const impCls = IMPACT_BADGE[e.impact] || 'badge bg-secondary';
+    const afterHoursMark = e.after_hours
+      ? '<span class="ms-1 text-warning" title="Fora do horário comercial"><i class="bi bi-moon-stars-fill" style="font-size:.7rem"></i></span>' : '';
+    const failureMark = e.has_failure_xref
+      ? '<span class="ms-1 text-danger" title="Job com falha de backup no período"><i class="bi bi-exclamation-circle-fill" style="font-size:.7rem"></i></span>' : '';
+    const opHtml = e.operator && e.operator !== '—'
+      ? `<span class="fw-semibold">${esc(e.operator)}</span>` : '<span class="text-muted">—</span>';
+    const importSrc = e.upload_session_id
+      ? `<span class="text-muted" style="font-size:.68rem">Upload #${esc(String(e.upload_session_id))}</span>`
+      : '<span class="text-muted small">—</span>';
+
+    return `<tr>
+      <td class="ps-3 small fw-semibold">${esc(e.time)}${afterHoursMark}${failureMark}</td>
+      <td><span class="badge ${badgeCls}" style="font-size:.68rem">${badgeLbl}</span></td>
+      <td class="small fw-semibold text-truncate" style="max-width:200px" title="${esc(e.job_name)}">${esc(e.job_name)}</td>
+      <td class="small">${opHtml}</td>
+      <td class="small text-muted text-truncate" style="max-width:140px" title="${esc(e.vbr_host)}">${esc(e.vbr_host)}</td>
+      <td class="small text-muted" style="max-width:200px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"
+          title="${esc(e.details)}">${esc(e.details) || '<span class="text-muted">—</span>'}</td>
+      <td>${importSrc}</td>
+      <td class="text-center"><span class="${impCls}" style="font-size:.65rem">${esc(e.impact)}</span></td>
+      <td class="text-center">
+        <button class="btn btn-link btn-sm p-0 text-muted" title="Ver detalhes"
+                onclick="openEventModal(${e.id})">
+          <i class="bi bi-zoom-in"></i>
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Table search ─────────────────────────────────────────────────────────────
+document.getElementById('tableSearch').addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.getElementById('eventsTableBody').querySelectorAll('tr').forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+});
+
+// ── Paginação ─────────────────────────────────────────────────────────────────
+async function loadAuditPage(page) {
+  _auditPage = page;
+  const params = _buildParams(page, parseInt(document.getElementById('selPageSize').value) || 20);
+  try {
+    const resp = await fetch('/api/audit-dashboard?' + params);
+    const data = await resp.json();
+    if (!resp.ok) return;
+    document.getElementById('tableSearch').value = '';
+    renderTable(data.events || []);
+    if (data.pagination) updateAuditPagination(data.pagination);
+  } catch(e) { console.error('Paginação auditoria:', e); }
+}
+
+function updateAuditPagination(p) {
+  const div  = document.getElementById('auditPagination');
+  const info = document.getElementById('auditPaginationInfo');
+  if (!p || p.total === 0) { div.classList.add('d-none'); return; }
+  div.classList.remove('d-none');
+  const from = (p.page - 1) * p.page_size + 1;
+  const to   = Math.min(p.page * p.page_size, p.total);
+  info.textContent = `${from}–${to} de ${fmt(p.total)} eventos`;
+  const atFirst = p.page <= 1;
+  const atLast  = p.page >= p.total_pages;
+  document.getElementById('btnAuditFirst').disabled = atFirst;
+  document.getElementById('btnAuditPrev').disabled  = atFirst;
+  document.getElementById('btnAuditNext').disabled  = atLast;
+  document.getElementById('btnAuditLast').disabled  = atLast;
+  document.getElementById('auditPageIndicator').textContent = `${p.page} / ${p.total_pages}`;
+  _auditPage       = p.page;
+  _auditPageSize   = p.page_size;
+  _auditTotalPages = p.total_pages;
+}
+
+document.getElementById('btnAuditFirst').addEventListener('click', () => loadAuditPage(1));
+document.getElementById('btnAuditPrev').addEventListener('click',  () => loadAuditPage(_auditPage - 1));
+document.getElementById('btnAuditNext').addEventListener('click',  () => loadAuditPage(_auditPage + 1));
+document.getElementById('btnAuditLast').addEventListener('click',  () => loadAuditPage(_auditTotalPages));
+document.getElementById('selPageSize').addEventListener('change', function() {
+  _auditPageSize = parseInt(this.value); loadAuditPage(1);
+});
+
+// ── Quick-filter pills ────────────────────────────────────────────────────────
+const PILL_ACTIVE_CLASS = {
+  all:             'btn-secondary',
+  job_created:     'btn-success',
+  job_updated:     'btn-warning',
+  job_deleted:     'btn-danger',
+  objects_added:   'btn-info',
+  objects_changed: 'btn-warning',
+  objects_deleted: 'btn-dark',
+};
+const PILL_OUTLINE_CLASS = {
+  all:             'btn-secondary',   // "Todos" has no outline variant — toggled via active class
+  job_created:     'btn-outline-success',
+  job_updated:     'btn-outline-warning',
+  job_deleted:     'btn-outline-danger',
+  objects_added:   'btn-outline-info',
+  objects_changed: 'btn-outline-warning',
+  objects_deleted: 'btn-outline-dark',
+};
+
+function updatePillActive(type) {
+  document.querySelectorAll('.evt-pill').forEach(btn => {
+    const t       = btn.dataset.type;
+    const isActive = t === type;
+    // Remove both variants then apply the correct one
+    btn.classList.remove(
+      'btn-secondary','btn-success','btn-warning','btn-danger','btn-info','btn-dark',
+      'btn-outline-secondary','btn-outline-success','btn-outline-warning',
+      'btn-outline-danger','btn-outline-info','btn-outline-dark',
+      'active'
+    );
+    if (isActive) {
+      btn.classList.add(PILL_ACTIVE_CLASS[t] || 'btn-secondary', 'active');
+    } else {
+      if (t === 'all') {
+        btn.classList.add('btn-outline-secondary');
+      } else {
+        btn.classList.add(PILL_OUTLINE_CLASS[t] || 'btn-outline-secondary');
+      }
+    }
+  });
+  // Sync top-bar select
+  document.getElementById('selEventType').value = type;
+}
+
+document.querySelectorAll('.evt-pill').forEach(btn => {
+  btn.addEventListener('click', function() {
+    updatePillActive(this.dataset.type);
+    _auditPage = 1;
+    loadData();
+  });
+});
+
+// Sync pills when the top-bar select is changed directly by the user
+document.getElementById('selEventType').addEventListener('change', function() {
+  updatePillActive(this.value);
+});
+
+// ── Event detail modal ────────────────────────────────────────────────────────
+async function openEventModal(id) {
+  const modal = new bootstrap.Modal(document.getElementById('modalEventDetail'));
+  document.getElementById('modalEventBody').innerHTML =
+    '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
+  modal.show();
+  try {
+    const resp = await fetch(`/api/audit-event/${id}`);
+    if (!resp.ok) { document.getElementById('modalEventBody').innerHTML = '<p class="text-danger">Erro ao carregar evento.</p>'; return; }
+    const d = await resp.json();
+    const [badgeCls, badgeLbl] = TYPE_BADGE[d.event_type] || ['bg-secondary', d.event_label];
+    const us = d.upload_session || {};
+    const rawXml = d.raw_xml ? `<pre class="bg-light border rounded p-2 small" style="max-height:200px;overflow-y:auto;word-break:break-all;white-space:pre-wrap">${esc(d.raw_xml)}</pre>` : '<span class="text-muted">—</span>';
+    document.getElementById('modalEventBody').innerHTML = `
+      <div class="row g-3">
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered small mb-0">
+            <tr><th class="bg-light" style="width:40%">Data/Hora</th><td>${esc(d.time)}</td></tr>
+            <tr><th class="bg-light">Tipo de alteração</th><td><span class="badge ${badgeCls}">${badgeLbl}</span></td></tr>
+            <tr><th class="bg-light">Job</th><td class="fw-semibold">${esc(d.job_name)}</td></tr>
+            <tr><th class="bg-light">Operador</th><td>${esc(d.operator)}</td></tr>
+            <tr><th class="bg-light">Servidor VBR</th><td>${esc(d.vbr_host)}</td></tr>
+            <tr><th class="bg-light">Event ID</th><td><code>${esc(String(d.event_id ?? '—'))}</code></td></tr>
+            <tr><th class="bg-light">Record ID</th><td><code>${esc(String(d.record_id ?? '—'))}</code></td></tr>
+            <tr><th class="bg-light">Provider</th><td class="text-muted">${esc(d.provider_name)}</td></tr>
+          </table>
+        </div>
+        <div class="col-md-6">
+          <table class="table table-sm table-bordered small mb-0">
+            <tr><th class="bg-light" style="width:40%">Arquivo fonte</th><td class="text-muted">${esc(d.source_filename)}</td></tr>
+            <tr><th class="bg-light">Importado em</th><td>${esc(d.imported_at)}</td></tr>
+            <tr><th class="bg-light">Upload #</th><td>${esc(String(us.id ?? '—'))}</td></tr>
+            <tr><th class="bg-light">Arquivo upload</th><td class="text-muted">${esc(us.filename ?? '—')}</td></tr>
+            <tr><th class="bg-light">Data do upload</th><td>${esc(us.uploaded_at ?? '—')}</td></tr>
+            <tr><th class="bg-light">Enviado por</th><td>${esc(us.uploaded_by ?? '—')}</td></tr>
+          </table>
+        </div>
+        <div class="col-12">
+          <p class="fw-semibold small mb-1">Detalhes do evento:</p>
+          <p class="small text-muted border rounded p-2 bg-light mb-2">${esc(d.details)}</p>
+          <p class="fw-semibold small mb-1">Mensagem original:</p>
+          <pre class="bg-light border rounded p-2 small" style="max-height:120px;overflow-y:auto;white-space:pre-wrap">${esc(d.original_message || '—')}</pre>
+          <p class="fw-semibold small mb-1">XML bruto:</p>
+          ${rawXml}
+        </div>
+      </div>`;
+  } catch(err) {
+    document.getElementById('modalEventBody').innerHTML = '<p class="text-danger">Erro ao carregar detalhes.</p>';
+  }
+}
+
+// ── Disponibilidade: consulta e auto-preenche datas ──────────────────────────
+// autoQuery=true → executa loadData() após preencher as datas
+async function loadAuditAvailability(clientId, autoQuery = false) {
+  const badge = document.getElementById('availBadge');
+  badge.innerHTML = '<span class="badge bg-light text-muted border" style="font-size:.7rem"><i class="bi bi-hourglass-split me-1"></i>Consultando…</span>';
+
+  try {
+    const params = clientId ? `?client_id=${clientId}` : '';
+    const data   = await fetch('/api/audit-availability' + params).then(r => r.json());
+
+    if (!data.total) {
+      badge.innerHTML = '<span class="badge bg-warning text-dark border" style="font-size:.7rem"><i class="bi bi-exclamation-triangle me-1"></i>Sem dados de auditoria</span>';
+      return;
+    }
+
+    // Auto-preenche as datas com o período disponível
+    document.getElementById('dateStart').value = data.min_date;
+    document.getElementById('dateEnd').value   = data.max_date;
+
+    badge.innerHTML = `
+      <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:.7rem">
+        <i class="bi bi-check-circle me-1"></i>${(data.total).toLocaleString('pt-BR')} eventos
+      </span>
+      <span class="badge bg-light text-muted border" style="font-size:.7rem">
+        <i class="bi bi-calendar-range me-1"></i>${data.min_date_fmt} → ${data.max_date_fmt}
+      </span>`;
+
+    if (autoQuery) {
+      loadData();
+    }
+  } catch(e) {
+    badge.innerHTML = '<span class="badge bg-light text-muted border" style="font-size:.7rem">—</span>';
+    console.warn('loadAuditAvailability:', e);
+  }
+}
+
+// ── Datas ─────────────────────────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+// Sem confirmação para períodos longos — auditoria é histórica por natureza
+function checkPeriod() { return true; }
+
+// ── Montar query params ───────────────────────────────────────────────────────
+function _buildParams(page, pageSize) {
+  const dateStart  = document.getElementById('dateStart').value;
+  const dateEnd    = document.getElementById('dateEnd').value;
+  const clientId   = document.getElementById('selClient').value;
+  const eventType  = document.getElementById('selEventType').value;
+  const jobFilter  = document.getElementById('filterJob').value;
+  const opFilter   = document.getElementById('filterOperator').value;
+  const vbrFilter  = document.getElementById('filterVbr').value;
+
+  const p = new URLSearchParams({
+    date_start: dateStart, date_end: dateEnd,
+    event_type: eventType, page, page_size: pageSize,
+  });
+  if (clientId)  p.set('client_id', clientId);
+  if (jobFilter) p.set('job_name',  jobFilter);
+  if (opFilter)  p.set('operator',  opFilter);
+  if (vbrFilter) p.set('vbr_host',  vbrFilter);
+  return p;
+}
+
+// ── Estados visuais ───────────────────────────────────────────────────────────
+function showWaiting() {
+  document.getElementById('waitingState').classList.remove('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+  document.getElementById('auditContent').classList.add('d-none');
+  document.getElementById('btnExportExcel').style.display = 'none';
+  document.getElementById('btnExportPptx').style.display = 'none';
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final antes de consultar.'); return; }
+  if (!checkPeriod()) return;
+
+  const pageSize = parseInt(document.getElementById('selPageSize').value) || 20;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+  document.getElementById('auditContent').style.opacity = '0.4';
+
+  const params = _buildParams(1, pageSize);
+
+  try {
+    const resp = await fetch('/api/audit-dashboard?' + params);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.error || 'Erro ao consultar dados.'); showWaiting(); return;
+    }
+    const data = await resp.json();
+
+    const isEmpty = (data.kpis?.total ?? 0) === 0;
+    document.getElementById('emptyState').classList.toggle('d-none', !isEmpty);
+    document.getElementById('auditContent').classList.toggle('d-none', isEmpty);
+
+    if (!isEmpty) {
+      updateKPIs(data.kpis);
+      renderDonut(data.type_distribution);
+      renderTimeline(data.events_by_day);
+      renderTopJobs(data.top_jobs);
+      renderOperatorRanking(data.operator_ranking || { labels:[], counts:[] });
+      renderSensitivePanel(data.sensitive_changes || []);
+      document.getElementById('tableSearch').value = '';
+      renderTable(data.events || []);
+      if (data.pagination) updateAuditPagination(data.pagination);
+      document.getElementById('btnExportExcel').style.display = '';
+      document.getElementById('btnExportPptx').style.display = '';
+    } else {
+      document.getElementById('auditPagination').classList.add('d-none');
+      document.getElementById('btnExportExcel').style.display = 'none';
+      document.getElementById('btnExportPptx').style.display = 'none';
+    }
+  } catch(e) {
+    console.error('Audit dashboard error:', e); showWaiting();
+  } finally {
+    document.getElementById('loadingOverlay').classList.add('d-none');
+    document.getElementById('auditContent').style.opacity = '1';
+  }
+}
+
+// ── Exports ───────────────────────────────────────────────────────────────────
+document.getElementById('btnExportExcel').addEventListener('click', () => {
+  const p = _buildParams(1, 5000);
+  window.location.href = '/api/export/audit-excel?' + p.toString();
+});
+
+document.getElementById('btnExportPptx').addEventListener('click', () => {
+  const p = _buildParams(1, 5000);
+  window.location.href = '/api/export/audit-pptx?' + p.toString();
+});
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadData);
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value      = '';
+  document.getElementById('filterJob').value      = '';
+  document.getElementById('filterOperator').value = '';
+  document.getElementById('filterVbr').value      = '';
+  updatePillActive('all');  // resets selEventType + pill highlight
+  // Recarrega disponibilidade geral (todos clientes) e limpa dados
+  loadAuditAvailability('', false);
+  showWaiting();
+});
+
+// Quando cliente muda: carrega disponibilidade → auto-preenche datas → auto-consulta
+document.getElementById('selClient').addEventListener('change', function() {
+  loadAuditAvailability(this.value, true);  // autoQuery=true
+});
+
+// ── Inicialização: carrega disponibilidade geral e auto-consulta ──────────────
+// Ao abrir a tela, mostra dados de todos os clientes imediatamente
+loadAuditAvailability('', true);
+</script>
+{% endblock %}

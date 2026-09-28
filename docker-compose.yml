@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-veeam_reporter}
+      POSTGRES_USER:     ${POSTGRES_USER:-veeam}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no arquivo .env (chmod 600)}
+    volumes:
+      - veeam_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-veeam} -d ${POSTGRES_DB:-veeam_reporter}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build: .
+    ports:
+      - "443:8443"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - veeam_uploads:/data/uploads
+      - veeam_reports:/data/reports
+      - veeam_certs:/data/certs
+      - veeam_branding:/data/branding
+    restart: unless-stopped
+    # ── Hardening de runtime (CNT-01) ──────────────────────────────────────
+    read_only: true            # filesystem raiz somente-leitura
+    tmpfs:
+      - /tmp                   # área temporária gravável (em memória)
+    security_opt:
+      - no-new-privileges:true # bloqueia escalonamento via setuid
+    cap_drop:
+      - ALL                    # remove todas as capabilities do kernel
+    pids_limit: 512
+    mem_limit: 2g
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-veeam}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no arquivo .env (chmod 600)}@db:5432/${POSTGRES_DB:-veeam_reporter}
+      - UPLOAD_DIR=/data/uploads
+      - REPORTS_DIR=/data/reports
+      - BRANDING_DIR=/data/branding
+      - HTTPS_ONLY=true
+      - PYTHONDONTWRITEBYTECODE=1   # não grava .pyc no rootfs read-only
+      - HOME=/tmp                   # caches de libs vão para o tmpfs
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # SESSION_SECRET: se não definido, gerado automaticamente em /data/certs/session.key
+      # ADMIN_USERNAME / ADMIN_PASSWORD / ADMIN_EMAIL: credenciais do admin inicial
+
+volumes:
+  veeam_db:
+  veeam_uploads:
+  veeam_reports:
+  veeam_certs:
+  veeam_branding:

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Resumo da Importação — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="page-title mb-0">
+        <i class="bi bi-check-circle-fill text-success me-2"></i>Importação concluída
+      </h2>
+      <div class="d-flex gap-2">
+        <a href="/import" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-upload me-1"></i>Nova importação
+        </a>
+        <a href="/reports/new" class="btn btn-primary btn-sm">
+          <i class="bi bi-file-earmark-bar-graph me-1"></i>Gerar relatório
+        </a>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle me-2 text-primary"></i>Detalhes da carga
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="small text-muted">Cliente</div>
+            <div class="fw-semibold">{{ client.name if client else '—' }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Arquivo</div>
+            <div class="fw-semibold">{{ session.original_filename }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Formato</div>
+            <div class="fw-semibold">.{{ session.file_format }}</div>
+          </div>
+          <div class="col-md-6">
+            <div class="small text-muted">Importado em</div>
+            <div class="fw-semibold">
+              {{ session.uploaded_at.strftime('%d/%m/%Y %H:%M') if session.uploaded_at else '—' }}
+            </div>
+          </div>
+          {% if session.period_start and session.period_end %}
+          <div class="col-12">
+            <div class="small text-muted">Período detectado nos eventos</div>
+            <div class="fw-semibold">
+              <i class="bi bi-calendar-range me-1 text-primary"></i>
+              {{ session.period_start.strftime('%d/%m/%Y') }}
+              → {{ session.period_end.strftime('%d/%m/%Y') }}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-primary">
+              {{ (session.total_events_read or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Lidos no arquivo</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-success bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-success">
+              {{ (session.new_events_inserted or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Novos inseridos</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-secondary bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-secondary">
+              {{ (session.duplicate_events_skipped or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Duplicatas ignoradas</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card text-center border-0 shadow-sm h-100 bg-warning bg-opacity-10">
+          <div class="card-body py-3">
+            <div class="fs-2 fw-bold text-warning">
+              {{ (session.invalid_events_skipped or 0) | format_number }}
+            </div>
+            <div class="small text-muted">Inválidos ignorados</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if session.backup_events_count or session.audit_events_count %}
+    <div class="row g-2 mb-4">
+      {% if session.backup_events_count %}
+      <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <i class="bi bi-hdd-stack fs-4 text-primary"></i>
+            <div>
+              <div class="fw-semibold small">Eventos de backup</div>
+              <div class="text-muted small">{{ session.backup_events_count | format_number }} lidos</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% if session.audit_events_count %}
+      <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body py-2 px-3 d-flex align-items-center gap-3">
+            <i class="bi bi-journal-check fs-4 text-info"></i>
+            <div>
+              <div class="fw-semibold small">Eventos de auditoria</div>
+              <div class="text-muted small">{{ session.audit_events_count | format_number }} lidos</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if session.error_message %}
+    <div class="alert alert-danger">
+      <i class="bi bi-exclamation-triangle me-2"></i>
+      <strong>Aviso:</strong> {{ session.error_message }}
+    </div>
+    {% endif %}
+
+    <div class="alert alert-info small mb-0">
+      <i class="bi bi-lightbulb me-2"></i>
+      Os eventos foram incorporados à base histórica do cliente
+      <strong>{{ client.name if client else '' }}</strong>.
+      Para gerar um relatório de período, acesse
+      <a href="/reports/new" class="alert-link">Gerar relatório</a>.
+      Você pode fazer novos uploads do mesmo período — duplicatas serão ignoradas automaticamente.
+    </div>
+
+  </div>
+</div>
+{% endblock %}

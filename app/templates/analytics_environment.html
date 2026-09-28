@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Consumo por Ambiente — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+  <div>
+    <h4 class="fw-bold mb-0 d-flex align-items-center gap-2">
+      <i class="bi bi-pie-chart" style="color:var(--brand-primary)"></i>
+      Consumo por Ambiente
+    </h4>
+    <p class="text-muted small mb-0">
+      Produção × Homologação × Livre no Performance Tier — para o relatório mensal.
+    </p>
+  </div>
+  {% if selected_client_id %}
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="/environment/classify?client_id={{ selected_client_id }}">
+      <i class="bi bi-tags me-1"></i>Classificar jobs
+    </a>
+    {% if data.has_data %}
+    <a class="btn btn-outline-success btn-sm" href="/analytics/environment/export-excel?client_id={{ selected_client_id }}">
+      <i class="bi bi-file-earmark-excel me-1"></i>Excel
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- seletor -->
+<div class="card shadow-sm mb-3"><div class="card-body py-3">
+  <form method="get" action="/analytics/environment" class="d-flex align-items-end gap-2">
+    <div>
+      <label class="form-label form-label-sm mb-1 small text-muted">Cliente</label>
+      <select name="client_id" class="form-select form-select-sm" style="min-width:240px"
+              onchange="this.form.submit()">
+        <option value="">Selecione o cliente...</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div></div>
+
+{% if not selected_client_id %}
+  <div class="alert alert-light border">Selecione um cliente para ver o consumo por ambiente.</div>
+{% elif not data.has_data %}
+  <div class="alert alert-warning">Nenhuma carga de "Backups em Disco" concluída foi encontrada para este cliente.</div>
+{% else %}
+
+  {% if data.n_hml == 0 %}
+  <div class="alert alert-warning d-flex align-items-center gap-2">
+    <i class="bi bi-exclamation-triangle"></i>
+    Nenhuma rotina marcada como homologação ainda — a fatia de homologação sairá zerada.
+    <a href="/environment/classify?client_id={{ selected_client_id }}" class="alert-link">Classificar agora</a>.
+  </div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Total do repositório</div>
+      <div class="fw-bold fs-4">{{ data.total | fmt_bytes }}</div>
+      <div class="small text-muted">Performance Tier</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Protegido Produção</div>
+      <div class="fw-bold fs-4" style="color:#4472C4">{{ data.prod | fmt_bytes }}</div>
+      <div class="small text-muted">usado − homologação</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Protegido Homologação</div>
+      <div class="fw-bold fs-4" style="color:#ED7D31">{{ data.hml | fmt_bytes }}</div>
+      <div class="small text-muted">{{ data.n_hml }} rotina(s) marcada(s)</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card shadow-sm h-100"><div class="card-body py-3">
+      <div class="text-muted small">Espaço Livre</div>
+      <div class="fw-bold fs-4" style="color:#70AD47">{{ data.free | fmt_bytes }}</div>
+      <div class="small text-muted">disponível</div>
+    </div></div></div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="fw-bold mb-0">Consumo do Repositório (TB)</h6>
+          <button class="btn btn-outline-secondary btn-sm" onclick="baixarPng()">
+            <i class="bi bi-download me-1"></i>Imagem
+          </button>
+        </div>
+        <div style="position:relative;height:340px"><canvas id="pie"></canvas></div>
+      </div></div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <h6 class="fw-bold mb-3">Rotinas de homologação ({{ data.n_hml }})</h6>
+        {% if data.hml_jobs %}
+        <div class="table-responsive" style="max-height:340px;overflow:auto">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light"><tr><th>Rotina</th><th class="text-end">Backup size</th></tr></thead>
+            <tbody>
+              {% for j in data.hml_jobs %}
+              <tr><td class="small">{{ j.job }}</td><td class="text-end fw-semibold">{{ j.bytes | fmt_bytes }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">Nenhuma rotina marcada como homologação.</p>
+        {% endif %}
+      </div></div>
+    </div>
+  </div>
+
+  <div class="alert alert-light border py-2 small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Homologação</strong> = soma do "Backup size" (bruto, como a Veeam mostra) das rotinas marcadas.
+    <strong>Produção</strong> = usado do Performance Tier − homologação. Total e livre vêm da capacidade real
+    dos extents. Coleta de {{ data.imp.imported_at.strftime('%d/%m/%Y %H:%M') if data.imp.imported_at else '—' }}.
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const PIE = {{ data.pie | tojson }};
+  const ctx = document.getElementById('pie');
+  const chart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: PIE.labels,
+      datasets: [{
+        data: PIE.tb,
+        backgroundColor: ['#4472C4', '#ED7D31', '#70AD47'],
+        borderWidth: 2, borderColor: getComputedStyle(document.body).backgroundColor
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: c => `${c.label}: ${c.parsed} TB` } }
+      }
+    }
+  });
+  function baixarPng() {
+    const a = document.createElement('a');
+    a.href = chart.toBase64Image('image/png', 1);
+    a.download = 'consumo_ambiente.png';
+    a.click();
+  }
+</script>
+{% endif %}
+{% endblock %}

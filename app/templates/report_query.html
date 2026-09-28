@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Novo Relatório — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+
+    <h2 class="page-title mb-1">
+      <i class="bi bi-file-earmark-bar-graph me-2"></i>Gerar Relatório por Período
+    </h2>
+    <p class="page-subtitle mb-4">
+      Selecione o cliente e o intervalo de datas. O relatório é gerado a partir da base histórica
+      de eventos já importados — sem necessidade de novo upload.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+      <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-sliders me-2"></i>Parâmetros do relatório
+      </div>
+      <div class="card-body">
+        <form action="/reports/new" method="post" id="reportForm">
+
+          <!-- Cliente -->
+          <div class="mb-4">
+            <label for="client_id" class="form-label fw-semibold">
+              Cliente <span class="text-danger">*</span>
+            </label>
+            {% if clients %}
+            <select class="form-select" id="client_id" name="client_id" required>
+              <option value="">— Selecione o cliente —</option>
+              {% for c in clients %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.description %} — {{ c.description }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <div class="alert alert-warning py-2 mb-0">
+              <i class="bi bi-exclamation-triangle me-2"></i>
+              Nenhum cliente cadastrado. <a href="/clients" class="alert-link">Cadastre um cliente</a> primeiro.
+            </div>
+            <input type="hidden" name="client_id" value="0">
+            {% endif %}
+          </div>
+
+          <!-- Período -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-6">
+              <label for="date_start" class="form-label fw-semibold">
+                Data início <span class="text-danger">*</span>
+              </label>
+              <input type="date" class="form-control" id="date_start" name="date_start"
+                     value="{{ default_start }}" required>
+            </div>
+            <div class="col-md-6">
+              <label for="date_end" class="form-label fw-semibold">
+                Data fim <span class="text-danger">*</span>
+              </label>
+              <input type="date" class="form-control" id="date_end" name="date_end"
+                     value="{{ default_end }}" required>
+            </div>
+            <div class="col-12">
+              <div class="form-text">
+                <i class="bi bi-info-circle me-1 text-info"></i>
+                Período sugerido: últimos 7 dias com dados importados.
+                Ajuste conforme necessário — o relatório consulta todos os eventos do intervalo.
+              </div>
+            </div>
+          </div>
+
+          <!-- Atalhos de período -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold small text-muted">Atalhos:</label>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-days="7">
+                Últimos 7 dias
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-days="14">
+                Últimos 14 dias
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-days="30">
+                Últimos 30 dias
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-week="current">
+                Semana atual (seg–dom)
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-week="last">
+                Semana anterior
+              </button>
+            </div>
+          </div>
+
+          <!-- Opções -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tipos de job</label>
+            <div class="d-flex gap-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="include_backup"
+                       id="includeBackup" value="true" checked>
+                <label class="form-check-label" for="includeBackup">
+                  <i class="bi bi-hdd-stack me-1 text-primary"></i>Backups regulares
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="include_log_backup"
+                       id="includeLogBackup" value="true" checked>
+                <label class="form-check-label" for="includeLogBackup">
+                  <i class="bi bi-journal-code me-1 text-warning"></i>Transaction logs
+                </label>
+              </div>
+            </div>
+            <div class="form-text">Se nenhum for marcado, ambos serão incluídos.</div>
+          </div>
+
+          <div class="mb-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="show_all_jobs"
+                     id="showAll" value="true">
+              <label class="form-check-label" for="showAll">
+                Incluir também jobs <strong>sem falhas</strong> no relatório
+              </label>
+            </div>
+          </div>
+
+          <div class="d-grid">
+            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn"
+                    {% if not clients %}disabled{% endif %}>
+              <i class="bi bi-play-circle me-2"></i>Gerar Relatório
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="text-center">
+      <a href="/reports" class="text-muted small">
+        <i class="bi bi-list me-1"></i>Ver todos os relatórios gerados
+      </a>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function setDates(startDate, endDate) {
+    document.getElementById('date_start').value = startDate;
+    document.getElementById('date_end').value = endDate;
+  }
+
+  function toISO(d) {
+    return d.toISOString().split('T')[0];
+  }
+
+  document.querySelectorAll('[data-days]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const days = parseInt(btn.dataset.days);
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - days + 1);
+      setDates(toISO(start), toISO(end));
+    });
+  });
+
+  document.querySelectorAll('[data-week]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const today = new Date();
+      const dow = today.getDay(); // 0=sun
+      const mondayOffset = (dow === 0) ? -6 : 1 - dow;
+      if (btn.dataset.week === 'current') {
+        const mon = new Date(today);
+        mon.setDate(today.getDate() + mondayOffset);
+        const sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        setDates(toISO(mon), toISO(sun));
+      } else {
+        const mon = new Date(today);
+        mon.setDate(today.getDate() + mondayOffset - 7);
+        const sun = new Date(mon);
+        sun.setDate(mon.getDate() + 6);
+        setDates(toISO(mon), toISO(sun));
+      }
+    });
+  });
+
+  document.getElementById('reportForm').addEventListener('submit', function () {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Gerando relatório...';
+  });
+</script>
+{% endblock %}

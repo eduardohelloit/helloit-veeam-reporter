@@ -1,0 +1,56 @@
+# =============================================================================
+# Override para VM de 1 GB de RAM (ex.: Oracle Cloud VM.Standard.E2.1.Micro).
+#
+# Como usar (na VM): copie este arquivo para a RAIZ do projeto com o nome
+#   docker-compose.override.yml
+# O Docker Compose carrega o override automaticamente junto do compose base.
+#
+# O que faz:
+#   - PostgreSQL frugal (shared_buffers/work_mem/etc. dimensionados p/ ~1 GB);
+#   - teto de RAM por container COM folga de swap (mem+swap), para picos
+#     (importacao de Event Viewer, geracao de relatorio) caírem no swap em vez
+#     de levar OOM-kill.
+#
+# NAO use este override em servidor com bastante RAM — ele limita de proposito.
+# =============================================================================
+services:
+  db:
+    # Postgres dimensionado para VM pequena. random_page_cost=1.1 assume disco
+    # SSD (block volume da OCI). max_connections baixo: o app usa poucas conexoes.
+    command: >
+      postgres
+      -c shared_buffers=96MB
+      -c effective_cache_size=256MB
+      -c maintenance_work_mem=32MB
+      -c work_mem=4MB
+      -c max_connections=20
+      -c wal_buffers=4MB
+      -c max_wal_size=512MB
+      -c min_wal_size=128MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+      -c synchronous_commit=off
+    mem_limit: 640m
+    memswap_limit: 3g       # ate ~2,4 GB de swap disponiveis ao Postgres no pico
+
+  web:
+    # O limite base do compose (2g) nunca e atingido em 1 GB; aqui reduzimos o
+    # teto de RAM e liberamos swap para o pico do matplotlib na geracao de PDF.
+    mem_limit: 512m
+    memswap_limit: 2g
+
+  # ── Cloudflare Tunnel (ZTNA / acesso externo sem abrir portas) ──────────────
+  # Conexao OUTBOUND-only: a VM disca para a Cloudflare, nada e exposto na OCI
+  # (nem precisa abrir 443 na Security List). Roda na mesma rede do compose, entao
+  # o roteamento do tunel aponta para o servico "web" na porta interna 8443
+  # (com "No TLS Verify" no painel, pois o cert do app e self-signed).
+  # O TUNNEL_TOKEN vem do .env (chmod 600) — criado no painel Zero Trust.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?defina TUNNEL_TOKEN no .env (painel Zero Trust > Tunnels)}
+    mem_limit: 128m
+    depends_on:
+      - web

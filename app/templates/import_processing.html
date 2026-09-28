@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Processando Importação — Veeam Reporter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white fw-semibold">
+        <i class="bi bi-arrow-repeat me-2"></i>Importando arquivo de eventos
+      </div>
+      <div class="card-body text-center py-5">
+
+        <div class="mb-4">
+          <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;">
+            <span class="visually-hidden">Processando...</span>
+          </div>
+        </div>
+
+        <p class="fw-semibold mb-1">
+          {{ session.client.name if session.client else '—' }}
+        </p>
+        <p class="text-muted small mb-4">{{ session.original_filename }}</p>
+
+        <div id="statusMsg" class="alert alert-info py-2 mb-0">
+          <i class="bi bi-hourglass-split me-2"></i>
+          <span id="statusText">{{ session.status_message or 'Aguardando...' }}</span>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const sessionId = {{ session.id }};
+  const summaryUrl = `/import/${sessionId}/summary`;
+
+  async function poll() {
+    try {
+      const resp = await fetch(`/api/import/status/${sessionId}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      document.getElementById('statusText').textContent = data.message || 'Processando...';
+
+      if (data.status === 'done') {
+        window.location.href = summaryUrl;
+        return;
+      }
+      if (data.status === 'error') {
+        const div = document.getElementById('statusMsg');
+        div.className = 'alert alert-danger py-2 mb-0';
+        div.innerHTML = `<i class="bi bi-x-circle me-2"></i>${data.message}`;
+        document.querySelector('.spinner-border').style.display = 'none';
+        return;
+      }
+    } catch (e) { /* network hiccup, retry */ }
+    setTimeout(poll, 1500);
+  }
+
+  setTimeout(poll, 1500);
+</script>
+{% endblock %}

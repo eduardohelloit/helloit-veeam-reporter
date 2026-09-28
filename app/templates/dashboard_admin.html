@@ -1,0 +1,597 @@
+{% extends "base.html" %}
+{% block title %}Relatório Administrativo — Veeam Weekly Reporter{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="page-title mb-0">
+      <i class="bi bi-shield-check me-2"></i>Relatório Administrativo
+      <span id="headerClientName" class="text-muted fw-normal fs-5 ms-2 d-none">
+        — <span id="headerClientNameText"></span>
+      </span>
+    </h2>
+    <p class="page-subtitle mb-0">
+      Status da última execução de cada rotina de backup no período selecionado
+    </p>
+  </div>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-building me-1 text-muted"></i>Cliente
+        </label>
+        <select class="form-select form-select-sm" id="selClient">
+          <option value="">Todos os clientes</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-journal-text me-1 text-muted"></i>Período salvo
+        </label>
+        <select class="form-select form-select-sm" id="selReport">
+          <option value="">— Selecione um relatório —</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>De
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateStart">
+      </div>
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-calendar-date me-1 text-muted"></i>Até
+        </label>
+        <input type="date" class="form-control form-control-sm" id="dateEnd">
+      </div>
+
+      <div class="col-6 col-sm-3 col-lg-2">
+        <label class="form-label small fw-semibold mb-1">
+          <i class="bi bi-funnel me-1 text-muted"></i>Tipo de Job
+        </label>
+        <select class="form-select form-select-sm" id="selJobType">
+          <option value="all">Todos</option>
+          <option value="backup">Backup</option>
+          <option value="log_backup">Transaction Log</option>
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-2 d-flex gap-1">
+        <button class="btn btn-primary btn-sm flex-fill" id="btnRefresh">
+          <i class="bi bi-search me-1"></i>Consultar
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnClear" title="Limpar filtros">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado inicial ───────────────────────────────────────────────────────── -->
+<div id="waitingState" class="text-center py-5">
+  <i class="bi bi-funnel fs-1 text-muted"></i>
+  <p class="text-muted mt-3 mb-1 fw-semibold">Selecione os filtros e clique em <strong>Consultar</strong></p>
+  <p class="text-muted small">Data inicial e data final são obrigatórias.</p>
+</div>
+
+<!-- ── Loading ─────────────────────────────────────────────────────────────── -->
+<div id="loadingOverlay" class="text-center py-4 d-none">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="text-muted mt-2 small">Calculando situação das rotinas...</p>
+</div>
+
+<!-- ── Empty state ─────────────────────────────────────────────────────────── -->
+<div id="emptyState" class="text-center py-5 d-none">
+  <i class="bi bi-inbox fs-1 text-muted"></i>
+  <p class="text-muted mt-3">
+    Nenhum dado encontrado para o período selecionado.<br>
+    <a href="/import" class="text-decoration-none">Importe um arquivo</a> para começar.
+  </p>
+</div>
+
+<!-- ── Content ─────────────────────────────────────────────────────────────── -->
+<div id="adminContent">
+
+  <!-- KPI cards — 2 cards: Backups Falha | Backups Sucesso -->
+  <div class="row g-2 mb-3">
+    <div class="col-6">
+      <div class="kpi-card card text-center h-100 bg-danger bg-opacity-10">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-hdd-stack me-1 text-primary"></i>Backups regulares
+          </div>
+          <div class="kpi-number text-danger" id="kpiBkpFailed">—</div>
+          <div class="text-muted small mt-1">com <strong>falha</strong></div>
+          <div class="badge bg-danger bg-opacity-75 mt-1" id="kpiBkpFailedPct">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6">
+      <div class="kpi-card card text-center h-100 bg-success bg-opacity-10">
+        <div class="card-body py-2 px-2">
+          <div class="small text-muted mb-1 fw-semibold">
+            <i class="bi bi-hdd-stack me-1 text-primary"></i>Backups regulares
+          </div>
+          <div class="kpi-number text-success" id="kpiBkpSuccess">—</div>
+          <div class="text-muted small mt-1">com <strong>sucesso</strong></div>
+          <div class="badge bg-success bg-opacity-75 mt-1" id="kpiBkpSuccessPct">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart + failed row -->
+  <div class="row g-3 mb-3 align-items-start">
+
+    <!-- Donut -->
+    <div class="col-12 col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold small">
+          <i class="bi bi-pie-chart me-2 text-muted"></i>Proporção — backups regulares
+        </div>
+        <div class="card-body d-flex flex-column align-items-center py-3">
+          <!-- Fixed-width wrapper: Chart.js fills this div, not the whole card -->
+          <div style="width:140px; height:140px; position:relative;">
+            <canvas id="chartAdminDonut"></canvas>
+          </div>
+          <div class="mt-3 w-100" id="donutLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Failed table -->
+    <div class="col-12 col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-exclamation-triangle me-2 text-danger"></i>
+            Rotinas com <strong class="text-danger">falha</strong> na última execução
+          </span>
+          <span class="badge bg-danger" id="badgeFailedCount">0</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-hover mb-0 align-middle" id="tblFailed">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th class="ps-3">Rotina de Backup</th>
+                <th class="text-center" style="width:80px">Tipo</th>
+                <th style="width:160px">Última Execução</th>
+                <th class="text-center" style="width:80px">Status</th>
+              </tr>
+            </thead>
+            <tbody id="bodyFailed">
+              <tr><td colspan="4" class="text-center text-muted py-3 small">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <!-- Paginação jobs com falha -->
+        <div class="card-footer py-1 px-3 d-flex align-items-center justify-content-between small text-muted" id="failedPagination" style="display:none!important">
+          <span id="failedPaginationInfo"></span>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" id="btnFailedPrev" title="Anterior"><i class="bi bi-chevron-left"></i></button>
+            <button class="btn btn-outline-secondary" id="btnFailedNext" title="Próximo"><i class="bi bi-chevron-right"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Success jobs table -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold small d-flex justify-content-between align-items-center">
+      <span>
+        <i class="bi bi-check-circle me-2 text-success"></i>
+        Rotinas com <strong class="text-success">sucesso</strong> na última execução
+        <span class="text-muted fw-normal ms-1 small">(sucesso + warning)</span>
+      </span>
+      <div class="d-flex align-items-center gap-2">
+        <input type="text" class="form-control form-control-sm" id="filterSuccess"
+               placeholder="Filtrar rotina..." style="width:160px">
+        <button class="btn btn-outline-success btn-sm" id="btnExportSLA" title="Exportar lista completa de jobs em CSV">
+          <i class="bi bi-download me-1"></i>Exportar SLA
+        </button>
+        <span class="badge bg-success" id="badgeSuccessCount">0</span>
+      </div>
+    </div>
+    <div class="card-body p-0" style="max-height:420px;overflow-y:auto">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light sticky-top">
+          <tr>
+            <th class="ps-3">Rotina de Backup</th>
+            <th class="text-center" style="width:80px">Tipo</th>
+            <th style="width:160px">Última Execução</th>
+            <th class="text-center" style="width:80px">Status</th>
+          </tr>
+        </thead>
+        <tbody id="bodySuccess">
+          <tr><td colspan="4" class="text-center text-muted py-3 small">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="alert alert-light border small">
+    <i class="bi bi-info-circle me-2 text-info"></i>
+    <strong>Critério de classificação:</strong>
+    A situação de cada rotina é determinada pelo <strong>resultado da última execução</strong>
+    registrada no período analisado. Warning é contabilizado como sucesso.
+  </div>
+
+</div><!-- /adminContent -->
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// ── Palette ─────────────────────────────────────────────────────────────────
+const C = {
+  green: '#7C3AED', red: '#DC3545', gray: '#718096',
+};
+
+const TOOLTIP_STYLE = {
+  backgroundColor: 'rgba(45,55,72,0.92)',
+  titleColor: '#fff', bodyColor: 'rgba(255,255,255,.85)',
+  padding: 10, cornerRadius: 6,
+};
+
+Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
+Chart.defaults.font.size   = 12;
+Chart.defaults.color       = '#718096';
+
+let donutChart  = null;
+let _allSuccess = [];
+let _allFailed  = [];
+
+function fmt(n) { return n.toLocaleString('pt-BR'); }
+function pct(a, b) { return b ? Math.round(a / b * 100 * 10) / 10 : 0; }
+
+// ── KPIs — backups regulares only ────────────────────────────────────────────
+function updateKPIs(failedJobs, successJobs) {
+  const bkpFail = failedJobs.filter(j => j.job_type !== 'log_backup').length;
+  const bkpOk   = successJobs.filter(j => j.job_type !== 'log_backup').length;
+  const bkpTotal = bkpFail + bkpOk;
+
+  document.getElementById('kpiBkpFailed').textContent    = fmt(bkpFail);
+  document.getElementById('kpiBkpSuccess').textContent   = fmt(bkpOk);
+  document.getElementById('kpiBkpFailedPct').textContent  = pct(bkpFail, bkpTotal) + '% dos backups';
+  document.getElementById('kpiBkpSuccessPct').textContent = pct(bkpOk,   bkpTotal) + '% dos backups';
+}
+
+// ── Donut — backups regulares: Falha vs Sucesso ──────────────────────────────
+function renderDonut(failedJobs, successJobs) {
+  const bkpFail = failedJobs.filter(j => j.job_type !== 'log_backup').length;
+  const bkpOk   = successJobs.filter(j => j.job_type !== 'log_backup').length;
+
+  if (donutChart) { donutChart.destroy(); donutChart = null; }
+
+  const ctx = document.getElementById('chartAdminDonut').getContext('2d');
+  donutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Com Falha', 'Com Sucesso'],
+      datasets: [{
+        data: [bkpFail, bkpOk],
+        backgroundColor: [C.red, C.green],
+        borderColor: '#fff', borderWidth: 3, hoverOffset: 6,
+      }],
+    },
+    options: {
+      cutout: '62%',
+      plugins: {
+        tooltip: { ...TOOLTIP_STYLE, callbacks: {
+          label: ctx => ` ${ctx.label}: ${fmt(ctx.raw)} rotinas`
+        }},
+        legend: { display: false },
+      },
+      responsive: true,
+      maintainAspectRatio: false,  // height controlled by wrapper div
+    },
+  });
+
+  function dot(color) {
+    return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:4px"></span>`;
+  }
+  document.getElementById('donutLegend').innerHTML = `
+    <div class="d-flex flex-column gap-1 small text-center">
+      <div>${dot(C.red)}<strong class="text-danger">${fmt(bkpFail)}</strong> com falha</div>
+      <div>${dot(C.green)}<strong class="text-success">${fmt(bkpOk)}</strong> com sucesso</div>
+    </div>`;
+}
+
+// ── Result badge ──────────────────────────────────────────────────────────────
+function resultBadge(result, label) {
+  const cls = { 0: 'bg-success', 1: 'bg-warning text-dark', 2: 'bg-danger' }[result] ?? 'bg-secondary';
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ── Type badge ────────────────────────────────────────────────────────────────
+function typeBadge(t) {
+  return t === 'log_backup'
+    ? '<span class="badge bg-warning text-dark" style="font-size:.7rem">LOG</span>'
+    : '<span class="badge bg-primary" style="font-size:.7rem">BKP</span>';
+}
+
+// ── Row HTML ──────────────────────────────────────────────────────────────────
+function jobRow(j) {
+  return `<tr>
+    <td class="ps-3 fw-semibold small">${j.job_name}</td>
+    <td class="text-center">${typeBadge(j.job_type)}</td>
+    <td class="small text-muted">${j.last_execution}</td>
+    <td class="text-center">${resultBadge(j.result, j.result_label)}</td>
+  </tr>`;
+}
+
+// ── Group header row ──────────────────────────────────────────────────────────
+function groupHeader(icon, iconClass, label, count) {
+  return `<tr class="table-light">
+    <td colspan="4" class="ps-3 py-1 small fw-semibold text-muted border-bottom">
+      <i class="bi ${icon} me-1 ${iconClass}"></i>${label}
+      <span class="badge bg-secondary ms-1 fw-normal">${count}</span>
+    </td>
+  </tr>`;
+}
+
+// ── Render table with type grouping ──────────────────────────────────────────
+function renderTable(tbodyId, jobs) {
+  const tbody = document.getElementById(tbodyId);
+  if (!jobs.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3 small">Nenhuma rotina nesta categoria.</td></tr>`;
+    return;
+  }
+  const backups = jobs.filter(j => j.job_type !== 'log_backup');
+  const logs    = jobs.filter(j => j.job_type === 'log_backup');
+  const hasBoth = backups.length > 0 && logs.length > 0;
+
+  let html = '';
+  if (hasBoth) {
+    html += groupHeader('bi-hdd-stack',    'text-primary', 'Backups Regulares', backups.length);
+    html += backups.map(jobRow).join('');
+    html += groupHeader('bi-journal-code', 'text-warning', 'Transaction Logs',  logs.length);
+    html += logs.map(jobRow).join('');
+  } else {
+    html += jobs.map(jobRow).join('');
+  }
+  tbody.innerHTML = html;
+}
+
+// ── Export SLA ────────────────────────────────────────────────────────────────
+function exportSLA() {
+  const clientSel  = document.getElementById('selClient');
+  const clientName = clientSel.value
+    ? (clientSel.options[clientSel.selectedIndex]?.text || 'cliente')
+    : 'todos-clientes';
+
+  const dateStart = document.getElementById('dateStart').value || '';
+  const dateEnd   = document.getElementById('dateEnd').value   || '';
+  const period    = (dateStart && dateEnd) ? `_${dateStart}_${dateEnd}` : '';
+
+  // All jobs: failed first (sorted), then success (sorted)
+  const TYPE_LABEL = { log_backup: 'Transaction Log', backup: 'Backup Regular' };
+  const allJobs = [
+    ..._allFailed.map(j => ({ ...j, _status_order: 0 })),
+    ..._allSuccess.map(j => ({ ...j, _status_order: 1 })),
+  ].sort((a, b) => a._status_order - b._status_order || a.job_name.localeCompare(b.job_name));
+
+  const BOM = '﻿';  // UTF-8 BOM for Excel
+  const lines = [
+    'Rotina de Backup;Tipo;Última Execução;Status',
+    ...allJobs.map(j =>
+      [j.job_name, TYPE_LABEL[j.job_type] || j.job_type, j.last_execution, j.result_label]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(';')
+    ),
+  ];
+
+  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `SLA_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}${period}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Success table filter ──────────────────────────────────────────────────────
+document.getElementById('filterSuccess').addEventListener('input', function () {
+  const q = this.value.toLowerCase();
+  renderTable('bodySuccess', _allSuccess.filter(j => j.job_name.toLowerCase().includes(q)));
+});
+
+document.getElementById('btnExportSLA').addEventListener('click', exportSLA);
+
+// ── Utilitários de data ─────────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().split('T')[0]; }
+function daysAgoStr(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; }
+function setDefaultDates() {
+  document.getElementById('dateStart').value = daysAgoStr(7);
+  document.getElementById('dateEnd').value   = todayStr();
+}
+function checkPeriod() {
+  const s = document.getElementById('dateStart').value;
+  const e = document.getElementById('dateEnd').value;
+  if (!s || !e) return true;
+  const days = (new Date(e) - new Date(s)) / 86400000;
+  if (days > 90) return confirm(`Período de ${Math.round(days)} dias selecionado.\nPeríodos extensos podem demorar mais para processar.\nDeseja continuar?`);
+  return true;
+}
+
+// ── Estados visuais ─────────────────────────────────────────────────────────
+function showWaiting() {
+  document.getElementById('waitingState').classList.remove('d-none');
+  document.getElementById('emptyState').classList.add('d-none');
+  document.getElementById('adminContent').classList.add('d-none');
+}
+
+// ── Cabeçalho do cliente ─────────────────────────────────────────────────────
+function updateClientHeader() {
+  const sel  = document.getElementById('selClient');
+  const name = sel.options[sel.selectedIndex]?.text || '';
+  const wrap = document.getElementById('headerClientName');
+  const txt  = document.getElementById('headerClientNameText');
+  if (sel.value && name && name !== 'Todos os clientes') {
+    txt.textContent = name; wrap.classList.remove('d-none');
+  } else {
+    wrap.classList.add('d-none');
+  }
+}
+
+// ── Relatórios por cliente ───────────────────────────────────────────────────
+async function loadReports(clientId) {
+  const sel = document.getElementById('selReport');
+  sel.innerHTML = '<option value="">— Selecione um relatório —</option>';
+  if (!clientId) return;
+  try {
+    const data = await fetch(`/api/reports-by-client?client_id=${clientId}`).then(r => r.json());
+    (data.reports || []).forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.id; o.dataset.start = r.date_start; o.dataset.end = r.date_end;
+      o.textContent = r.label; sel.appendChild(o);
+    });
+  } catch(e) { console.warn('Erro ao carregar relatórios:', e); }
+}
+
+// ── Paginação de jobs com falha ──────────────────────────────────────────────
+let _failedPage = 1;
+
+async function loadFailedPage(page) {
+  _failedPage = page;
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+  const clientId  = document.getElementById('selClient').value;
+  const jobType   = document.getElementById('selJobType').value;
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, job_type: jobType, failed_page: page, failed_page_size: 10 });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/admin-dashboard?' + params);
+    const data = await resp.json();
+    if (!resp.ok || !data.failed_jobs) return;
+
+    _allFailed = data.failed_jobs;
+    renderTable('bodyFailed', _allFailed);
+
+    const p = data.failed_pagination;
+    updateFailedPagination(p);
+  } catch(e) { console.error('Paginação falha:', e); }
+}
+
+function updateFailedPagination(p) {
+  const div  = document.getElementById('failedPagination');
+  const info = document.getElementById('failedPaginationInfo');
+  if (!p || p.total === 0) { div.style.display = 'none'; return; }
+
+  div.style.removeProperty('display');
+  const from = (p.page - 1) * p.page_size + 1;
+  const to   = Math.min(p.page * p.page_size, p.total);
+  info.textContent = `${from}–${to} de ${p.total} rotinas com falha`;
+
+  document.getElementById('btnFailedPrev').disabled = p.page <= 1;
+  document.getElementById('btnFailedNext').disabled = p.page >= p.total_pages;
+}
+
+document.getElementById('btnFailedPrev').addEventListener('click', () => loadFailedPage(_failedPage - 1));
+document.getElementById('btnFailedNext').addEventListener('click', () => loadFailedPage(_failedPage + 1));
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  const dateStart = document.getElementById('dateStart').value;
+  const dateEnd   = document.getElementById('dateEnd').value;
+
+  if (!dateStart || !dateEnd) { alert('Informe data inicial e data final antes de consultar.'); return; }
+  if (!checkPeriod()) return;
+
+  const clientId = document.getElementById('selClient').value;
+  const jobType  = document.getElementById('selJobType').value;
+
+  document.getElementById('waitingState').classList.add('d-none');
+  document.getElementById('loadingOverlay').classList.remove('d-none');
+  document.getElementById('adminContent').style.opacity = '0.4';
+
+  const params = new URLSearchParams({ date_start: dateStart, date_end: dateEnd, job_type: jobType, failed_page: 1, failed_page_size: 10 });
+  if (clientId) params.set('client_id', clientId);
+
+  try {
+    const resp = await fetch('/api/admin-dashboard?' + params);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.error || 'Erro ao consultar dados.'); showWaiting(); return;
+    }
+    const data = await resp.json();
+
+    _failedPage = 1;
+    const isEmpty = data.kpis.total === 0;
+    document.getElementById('emptyState').classList.toggle('d-none', !isEmpty);
+    document.getElementById('adminContent').classList.toggle('d-none', isEmpty);
+
+    if (!isEmpty) {
+      _allFailed  = data.failed_jobs;
+      _allSuccess = data.success_jobs;
+
+      updateKPIs(_allFailed, _allSuccess);
+      renderDonut(_allFailed, _allSuccess);
+
+      document.getElementById('badgeFailedCount').textContent  = data.kpis.failed;
+      document.getElementById('badgeSuccessCount').textContent = _allSuccess.length;
+      document.getElementById('filterSuccess').value = '';
+      renderTable('bodyFailed',  _allFailed);
+      renderTable('bodySuccess', _allSuccess);
+      updateFailedPagination(data.failed_pagination);
+    }
+  } catch(e) {
+    console.error('Admin dashboard error:', e); showWaiting();
+  } finally {
+    document.getElementById('loadingOverlay').classList.add('d-none');
+    document.getElementById('adminContent').style.opacity = '1';
+  }
+}
+
+// ── Controles ─────────────────────────────────────────────────────────────────
+document.getElementById('btnRefresh').addEventListener('click', loadData);
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  document.getElementById('selClient').value  = '';
+  document.getElementById('selReport').value  = '';
+  document.getElementById('selJobType').value = 'all';
+  setDefaultDates();
+  updateClientHeader();
+  showWaiting();
+});
+
+document.getElementById('selClient').addEventListener('change', function () {
+  document.getElementById('selReport').value = '';
+  loadReports(this.value);
+  updateClientHeader();
+});
+
+document.getElementById('selReport').addEventListener('change', function () {
+  const opt = this.options[this.selectedIndex];
+  if (opt && opt.dataset.start) {
+    document.getElementById('dateStart').value = opt.dataset.start;
+    document.getElementById('dateEnd').value   = opt.dataset.end;
+  }
+});
+
+['dateStart', 'dateEnd'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => {
+    document.getElementById('selReport').value = '';
+  });
+});
+
+// ── Inicialização ──────────────────────────────────────────────────────────────
+setDefaultDates();
+showWaiting();
+</script>
+{% endblock %}

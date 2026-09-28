@@ -1,0 +1,23 @@
+# Segredos / ambiente
+.env
+.env.local
+*.key
+*.pem
+*.ppk
+
+# Dados de runtime
+uploads/
+reports/
+branding/
+*.sqlite
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
