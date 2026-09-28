@@ -44,10 +44,15 @@ com identidade visual configurável por perfil.
 
 ## 📸 Screenshots
 
-<!-- Coloque imagens em docs/screenshots/ e referencie aqui, ex.:
-![Dashboard](docs/screenshots/dashboard.png)
--->
-_Em breve._
+**Proteção de VMs** — evolução do parque protegido, com e sem transaction log
+
+![Proteção de VMs](docs/screenshots/protecao-vms.png)
+
+**RPO Observado por VM** — RPO real × esperado, com status por máquina
+
+![RPO Observado por VM](docs/screenshots/rpo-observado.png)
+
+<sub>Dados fictícios de demonstração.</sub>
 
 ## ⚡ Quickstart
 

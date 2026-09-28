@@ -117,14 +117,15 @@ body {
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 .btn-primary {
   background-color: var(--brand-primary) !important;
-  border-color: var(--brand-secondary) !important;
+  border-color: var(--brand-primary) !important;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .btn-primary:hover, .btn-primary:focus {
-  background-color: var(--brand-secondary) !important;
-  border-color: var(--brand-secondary) !important;
+  background-color: var(--brand-primary) !important;
+  border-color: var(--brand-primary) !important;
+  filter: brightness(.88);
   box-shadow: 0 0 0 3px rgba(124,58,237,.25) !important;
 }
 
